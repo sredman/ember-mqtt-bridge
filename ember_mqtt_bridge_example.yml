@@ -1,0 +1,12 @@
+---
+# The MAC address of your Ember mug
+ooler_mac: "AA:BB:CC:DD:EE:FF"
+# The hostname/IP of your broker
+mqtt_broker: homeassistant.home.arpa
+# If you have a custom Home Assistant discovery prefix, set it here
+discovery_prefix: homeassistant
+# How often to send periodic updates, in seconds
+update_interval: 30
+# MQTT login information
+mqtt_username: username
+mqtt_password: password

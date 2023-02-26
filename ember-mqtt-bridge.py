@@ -25,6 +25,7 @@ class EmberMqttBridge:
         mqtt_username,
         mqtt_password,
         update_interval,
+        discovery_prefix,
         ):
         self.MAC = MAC
         self.mqtt_broker = mqtt_broker
@@ -32,6 +33,7 @@ class EmberMqttBridge:
         self.mqtt_username = mqtt_username
         self.mqtt_password = mqtt_password
         self.update_interval = update_interval
+        self.discovery_prefix = discovery_prefix
 
         self.validate_parameters()
 
@@ -68,6 +70,9 @@ def main():
 
     parser.add_argument("-i", "--update-interval", type=int, default=30,
         help="Frequency at which to send out update messages, in seconds.")
+
+    parser.add_argument("--discovery-prefix", default="homeassistant",
+        help="MQTT discovery prefix.")
     
     parser.add_argument
 
