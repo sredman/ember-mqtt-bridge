@@ -1,0 +1,2 @@
+asyncio-mqtt>=0.16.1
+python-ember-mug>=0.6.0
