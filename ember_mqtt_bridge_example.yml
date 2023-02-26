@@ -1,6 +1,6 @@
 ---
 # The MAC address of your Ember mug
-ooler_mac: "AA:BB:CC:DD:EE:FF"
+MAC: "AA:BB:CC:DD:EE:FF"
 # The hostname/IP of your broker
 mqtt_broker: homeassistant.home.arpa
 # If you have a custom Home Assistant discovery prefix, set it here

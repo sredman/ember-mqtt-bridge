@@ -51,7 +51,7 @@ def main():
         description="Integrate your Ember mug with your MQTT server")
     
     parser.add_argument("-c", "--config-file",
-        help="Path to a YAML file from which to read options.")
+        help="Path to a YAML file from which to read options. If any options are specified in this file and on the command line, the command line option will take prescidence.")
     
     parser.add_argument("--MAC",
         help="MAC address of your Ember mug.")
@@ -84,7 +84,9 @@ def main():
             config = yaml.safe_load(config_file)
 
     for arg in vars(args):
-        config[arg] = getattr(args, arg)
+        val = getattr(args, arg)
+        if val is not None:
+            config[arg] = val
 
     del config["config_file"]
 
