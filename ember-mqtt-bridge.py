@@ -15,6 +15,7 @@ import ember_mug
 
 import argparse
 from exceptiongroup import ExceptionGroup, catch
+import yaml
 
 class EmberMqttBridge:
     def __init__(
