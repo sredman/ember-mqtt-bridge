@@ -14,6 +14,7 @@ import asyncio_mqtt
 import ember_mug
 
 import argparse
+from exceptiongroup import ExceptionGroup, catch
 
 class EmberMqttBridge:
     def __init__(
@@ -31,6 +32,16 @@ class EmberMqttBridge:
         self.mqtt_username = mqtt_username
         self.mqtt_password = mqtt_password
         self.update_interval = update_interval
+
+        self.validate_parameters()
+
+    def validate_parameters(self):
+        unsupplied_params = [var for var in vars(self) if getattr(self, var) is None]
+
+        if len(unsupplied_params) > 0:
+            raise ExceptionGroup(
+                "One or more parameters was not provided",
+                [ValueError(param) for param in unsupplied_params])
 
 def main():
     parser = argparse.ArgumentParser(
@@ -69,6 +80,10 @@ def main():
 
     for arg in vars(args):
         config[arg] = getattr(args, arg)
+
+    del config["config_file"]
+
+    bridge = EmberMqttBridge(**config)
 
 if __name__ == "__main__":
     main()
