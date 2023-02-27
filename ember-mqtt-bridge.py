@@ -25,6 +25,8 @@ MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
 
 EmberMug.get_state_topic = lambda mug: f"ember/{EmberMqttBridge.sanitise_mac(mug.device.address)}/state"
 
+EMBER_MANUFACTURER = "Ember"
+
 class EmberMqttBridge:
     def __init__(
         self,
@@ -46,6 +48,9 @@ class EmberMqttBridge:
 
         self.validate_parameters()
 
+        self.known_devices = set()
+        self.known_devices_lock = asyncio.Lock()
+
     def validate_parameters(self):
         unsupplied_params = [var for var in vars(self) if getattr(self, var) is None]
 
@@ -55,22 +60,18 @@ class EmberMqttBridge:
                 [ValueError(param) for param in unsupplied_params])
 
     async def start(self):
-        devices = await discover_mugs(self.MAC)
-        device = [device for device in devices if device.address == self.MAC][0]
-        mug = EmberMug(device)
         async with Client(
             hostname=self.mqtt_broker,
             port=self.mqtt_broker_port,
             username=self.mqtt_username,
             password=self.mqtt_password,
             ) as client:
-            await self.send_mqtt_discovery(client, mug)
-            await self.start_listener_loop(client, mug)
-        pass
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(self.read_existing_mqtt_devices(client))
 
-    async def send_mqtt_discovery(self, client: Client, mug: EmberMug):
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(self.send_root_device(client, mug))
+    async def add_known_device(self, device_mac: str) -> None:
+        async with self.known_devices_lock:
+            self.known_devices.add(device_mac)
 
     def sanitise_mac(mac: str) -> str:
         """Clean up a MAC so it's suitable for use where colons aren't"""
@@ -80,7 +81,7 @@ class EmberMqttBridge:
         return {
             "connections": [("mac", self.MAC)],
             "model": mug.device.name,
-            "manufacturer": "Ember",
+            "manufacturer": EMBER_MANUFACTURER,
             "suggested_area": "Office",
         }
 
@@ -95,21 +96,41 @@ class EmberMqttBridge:
                 "current_temperature_template": "{{ value_json.current_temperature }}",
                 "temperature_state_topic": mug.get_state_topic(),
                 "temperature_state_template": "{{ value_json.desired_temperature }}",
+                "availability_topic": mug.get_state_topic(),
+                "availability_template": "{{ value_json.availability }}",
                 "mode_command_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/power/set",
                 "temperature_command_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/temperature/set",
-                "modes": ["on", "off"],
-                #"temperature_unit": "F",
+                "modes": ["heat", "off"],
+                "temperature_unit": "C" if mug.data.use_metric else "F",
                 "temp_step": 1,
                 "unique_id": self.MAC,
                 "device": self.get_device_definition(mug),
                 "icon": "mdi:coffee",
-                #"max_temp": 120,
-                #"min_temp": 45,
+                "max_temp": 145,
+                "min_temp": 120,
             })
-        await client.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
+        await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
 
     async def start_listener_loop(self, client: Client, mug: EmberMug):
         pass
+
+    async def read_existing_mqtt_devices(self, mqtt: Client):
+        '''
+        Look for MQTT messages indicating devices which have been discovered in the past,
+        which we should be on the lookout for.
+        These devices may be from other Ember bridges running on the same MQTT server,
+        so we _cannot_ expect that they are paired.
+        '''
+        async with mqtt.messages() as messages:
+            await mqtt.subscribe(f"{self.discovery_prefix}/#")
+            async for message in messages:
+                data = json.loads(message.payload)
+                if data and "device" in data:
+                    device = data["device"]
+                    if "connections" in device and "manufacturer" in device:
+                        if device["manufacturer"] == EMBER_MANUFACTURER:
+                            connections = device["connections"]
+                            await self.add_known_device(connections[0][1])
 
 def main():
     parser = argparse.ArgumentParser(
