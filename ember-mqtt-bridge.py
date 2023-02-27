@@ -32,7 +32,6 @@ EMBER_MANUFACTURER = "Ember"
 class EmberMqttBridge:
     def __init__(
         self,
-        MAC,
         mqtt_broker,
         mqtt_broker_port,
         mqtt_username,
@@ -40,7 +39,6 @@ class EmberMqttBridge:
         update_interval,
         discovery_prefix,
         ):
-        self.MAC = MAC
         self.mqtt_broker = mqtt_broker
         self.mqtt_broker_port = mqtt_broker_port
         self.mqtt_username = mqtt_username
@@ -171,9 +169,6 @@ def main():
     
     parser.add_argument("-c", "--config-file",
         help="Path to a YAML file from which to read options. If any options are specified in this file and on the command line, the command line option will take prescidence.")
-    
-    parser.add_argument("--MAC",
-        help="MAC address of your Ember mug.")
 
     parser.add_argument("-b", "--mqtt-broker",
         help="Target MQTT broker, like test.mosquitto.org.")
