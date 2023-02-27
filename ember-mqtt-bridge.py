@@ -127,6 +127,16 @@ class EmberMqttBridge:
         )
         await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
 
+    async def send_update_offline(self, mqtt: Client, addr: str):
+        state = {
+            "availability": "offline"
+        }
+        update_payload: MqttPayload = MqttPayload(
+            topic=f"ember/{EmberMqttBridge.sanitise_mac(addr)}/state",
+            payload=state
+        )
+        await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
+
     async def read_existing_mqtt_devices(self, mqtt: Client):
         '''
         Look for MQTT messages indicating devices which have been discovered in the past,
@@ -146,19 +156,37 @@ class EmberMqttBridge:
                             await self.add_known_device(connections[0][1])
 
     async def start_mug_polling(self, mqtt: Client):
+        tracked_mugs = {}
         while True:
-            visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()]
+            missing_mugs = [] # Paired mugs which we could not find
+            visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()] # Find un-paired mugs in pairing mode
+            async with self.known_devices_lock:
+                for addr in self.known_devices:
+                    device = await ember_mug_scanner.find_mug(addr) # Find paired mugs
+                    if device is None:
+                        pass # I guess it's not in range. Send an "offline" status update?
+                        if addr in tracked_mugs:
+                            missing_mugs.append(addr)
+                            del tracked_mugs[addr]
+                    else:
+                        if not addr in tracked_mugs:
+                            tracked_mugs[addr] = EmberMug(device)
+                        visible_mugs.append(tracked_mugs[addr])
             async with asyncio.TaskGroup() as tg:
                 for mug in visible_mugs:
                     # Using target_temp as a proxy for data being initialized.
                     if mug.data.target_temp == 0:
-                        await mug.update_all() # This will "leak" a connection, which is fine since I want to stay connected anyway.
-                        await mug.subscribe()
+                        async with mug.connection():
+                            await mug.update_all()
+                            await mug.subscribe()
                         tg.create_task(self.send_root_device(mqtt, mug))
                         pass
 
                     await mug.update_queued_attributes()
                     tg.create_task(self.send_update(mqtt, mug))
+
+                for mug in missing_mugs:
+                    tg.create_task(self.send_update_offline(mqtt, mug))
 
             await asyncio.sleep(self.update_interval)
 
