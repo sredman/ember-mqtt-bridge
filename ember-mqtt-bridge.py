@@ -12,7 +12,8 @@ import asyncio
 import asyncio_mqtt
 from asyncio_mqtt import Client
 
-from ember_mug.scanner import find_mug, discover_mugs
+import ember_mug.consts as ember_mug_consts
+import ember_mug.scanner as ember_mug_scanner
 from ember_mug.mug import EmberMug
 
 import argparse
@@ -69,6 +70,7 @@ class EmberMqttBridge:
             ) as client:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self.read_existing_mqtt_devices(client))
+                tg.create_task(self.start_mug_polling(client))
 
     async def add_known_device(self, device_mac: str) -> None:
         async with self.known_devices_lock:
@@ -80,15 +82,17 @@ class EmberMqttBridge:
 
     def get_device_definition(self, mug: EmberMug):
         return {
-            "connections": [("mac", self.MAC)],
+            # This connection may strictly not be a MAC if you are (for instance) running on
+            # MacOS where Bleak isn't allowed to acces the MAC information.
+            "connections": [("mac", mug.device.address)],
             "model": mug.device.name,
             "manufacturer": EMBER_MANUFACTURER,
             "suggested_area": "Office",
         }
 
-    async def send_root_device(self, client: Client, mug: EmberMug):
+    async def send_root_device(self, mqtt: Client, mug: EmberMug):
         root_device_payload: MqttPayload = MqttPayload(
-            topic= f"{self.discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.MAC)}/config",
+            topic= f"{self.discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(mug.device.address)}/config",
             payload={
                 "name": mug.device.name,
                 "mode_state_topic": mug.get_state_topic(),
@@ -112,8 +116,18 @@ class EmberMqttBridge:
             })
         await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
 
-    async def start_listener_loop(self, client: Client, mug: EmberMug):
-        pass
+    async def send_update(self, mqtt: Client, mug: EmberMug):
+        state = {
+            "power": "heat" if mug.data.liquid_state == ember_mug_consts.LiquidState.HEATING else "off",
+            "current_temperature": mug.data.current_temp,
+            "desired_temperature": mug.data.target_temp,
+            "availability": "online", # If we're sending this, the device must have been visible. Need to send a last will message when we lose connection.
+        }
+        update_payload: MqttPayload = MqttPayload(
+            topic=mug.get_state_topic(),
+            payload=state
+        )
+        await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
 
     async def read_existing_mqtt_devices(self, mqtt: Client):
         '''
@@ -132,6 +146,23 @@ class EmberMqttBridge:
                         if device["manufacturer"] == EMBER_MANUFACTURER:
                             connections = device["connections"]
                             await self.add_known_device(connections[0][1])
+
+    async def start_mug_polling(self, mqtt: Client):
+        while True:
+            visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()]
+            async with asyncio.TaskGroup() as tg:
+                for mug in visible_mugs:
+                    # Using target_temp as a proxy for data being initialized.
+                    if mug.data.target_temp == 0:
+                        await mug.update_all() # This will "leak" a connection, which is fine since I want to stay connected anyway.
+                        await mug.subscribe()
+                        tg.create_task(self.send_root_device(mqtt, mug))
+                        pass
+
+                    await mug.update_queued_attributes()
+                    tg.create_task(self.send_update(mqtt, mug))
+
+            await asyncio.sleep(self.update_interval)
 
 def main():
     parser = argparse.ArgumentParser(
