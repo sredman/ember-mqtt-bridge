@@ -23,7 +23,8 @@ import yaml
 
 MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
 
-EmberMug.get_state_topic = lambda mug: f"ember/{EmberMqttBridge.sanitise_mac(mug.device.address)}/state"
+EmberMug.get_topic = lambda mug: f"ember/{EmberMqttBridge.sanitise_mac(mug.device.address)}"
+EmberMug.get_state_topic = lambda mug: f"{mug.get_topic()}/state"
 
 EMBER_MANUFACTURER = "Ember"
 
@@ -98,12 +99,12 @@ class EmberMqttBridge:
                 "temperature_state_template": "{{ value_json.desired_temperature }}",
                 "availability_topic": mug.get_state_topic(),
                 "availability_template": "{{ value_json.availability }}",
-                "mode_command_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/power/set",
-                "temperature_command_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/temperature/set",
+                "mode_command_topic": f"{mug.get_topic()}/power/set",
+                "temperature_command_topic": f"{mug.get_topic()}/temperature/set",
                 "modes": ["heat", "off"],
                 "temperature_unit": "C" if mug.data.use_metric else "F",
                 "temp_step": 1,
-                "unique_id": self.MAC,
+                "unique_id": mug.device.address,
                 "device": self.get_device_definition(mug),
                 "icon": "mdi:coffee",
                 "max_temp": 145,
