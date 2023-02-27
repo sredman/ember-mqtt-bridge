@@ -23,6 +23,8 @@ import yaml
 
 MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
 
+EmberMug.get_state_topic = lambda mug: f"ember/{EmberMqttBridge.sanitise_mac(mug.device.address)}/state"
+
 class EmberMqttBridge:
     def __init__(
         self,
@@ -87,11 +89,11 @@ class EmberMqttBridge:
             topic= f"{self.discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.MAC)}/config",
             payload={
                 "name": mug.device.name,
-                "mode_state_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/state",
+                "mode_state_topic": mug.get_state_topic(),
                 "mode_state_template": "{{ value_json.power }}",
-                "current_temperature_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/state",
+                "current_temperature_topic": mug.get_state_topic(),
                 "current_temperature_template": "{{ value_json.current_temperature }}",
-                "temperature_state_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/state",
+                "temperature_state_topic": mug.get_state_topic(),
                 "temperature_state_template": "{{ value_json.desired_temperature }}",
                 "mode_command_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/power/set",
                 "temperature_command_topic": f"ember/{EmberMqttBridge.sanitise_mac(self.MAC)}/temperature/set",
