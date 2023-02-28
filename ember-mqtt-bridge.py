@@ -115,7 +115,7 @@ class EmberMqttBridge:
                 "availability_template": "{{ value_json.availability }}",
                 "mode_command_topic": f"{mug.get_topic()}/power/set",
                 "temperature_command_topic": f"{mug.get_topic()}/temperature/set",
-                "modes": ["heat", "off"],
+                "modes": ["auto", "off"],
                 "temperature_unit": "C" if mug.data.use_metric else "F",
                 "temp_step": 1,
                 "unique_id": mug.device.address,
@@ -127,8 +127,17 @@ class EmberMqttBridge:
         await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
 
     async def send_update(self, mqtt: Client, mug: EmberMug):
+        match mug.data.liquid_state:
+            case ember_mug_consts.LiquidState.HEATING:
+                mode = "auto"
+            case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
+                mode = "auto"
+            case ember_mug_consts.LiquidState.COOLING:
+                mode = "auto"
+            case other:
+                mode = "off"
         state = {
-            "power": "heat" if mug.data.liquid_state == ember_mug_consts.LiquidState.HEATING else "off",
+            "power": mode,
             "current_temperature": mug.data.current_temp,
             "desired_temperature": mug.data.target_temp,
             "availability": "online", # If we're sending this, the device must have been visible. Need to send a last will message when we lose connection.
