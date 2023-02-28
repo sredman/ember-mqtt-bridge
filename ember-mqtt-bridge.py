@@ -10,7 +10,7 @@
 
 import asyncio
 import asyncio_mqtt
-from asyncio_mqtt import Client
+from asyncio_mqtt import Client, MqttError
 
 import ember_mug.consts as ember_mug_consts
 import ember_mug.scanner as ember_mug_scanner
@@ -49,6 +49,8 @@ class EmberMqttBridge:
 
         self.validate_parameters()
 
+        self.retry_interval_secs = 1
+
         self.logger = logging.getLogger(__name__)
 
         self.known_devices = set()
@@ -63,15 +65,21 @@ class EmberMqttBridge:
                 [ValueError(param) for param in unsupplied_params])
 
     async def start(self):
-        async with Client(
-            hostname=self.mqtt_broker,
-            port=self.mqtt_broker_port,
-            username=self.mqtt_username,
-            password=self.mqtt_password,
-            ) as client:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(self.read_existing_mqtt_devices(client))
-                tg.create_task(self.start_mug_polling(client))
+        while True:
+            try:
+                async with Client(
+                    hostname=self.mqtt_broker,
+                    port=self.mqtt_broker_port,
+                    username=self.mqtt_username,
+                    password=self.mqtt_password,
+                    ) as client:
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(self.read_existing_mqtt_devices(client))
+                        tg.create_task(self.start_mug_polling(client))
+                        tg.create_task(self.start_mqtt_listener(client))
+            except MqttError as err:
+                self.logger.warning(f"MQTT connection failed with {err}")
+                await asyncio.sleep(self.retry_interval_secs)
 
     async def add_known_device(self, device_mac: str) -> None:
         async with self.known_devices_lock:
