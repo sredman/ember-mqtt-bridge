@@ -22,14 +22,69 @@ from collections import namedtuple
 from exceptiongroup import ExceptionGroup, catch
 import json
 import logging
+from typing import Dict
 import yaml
 
 MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
 
-EmberMug.get_topic = lambda mug: f"ember/{EmberMqttBridge.sanitise_mac(mug.device.address)}"
-EmberMug.get_state_topic = lambda mug: f"{mug.get_topic()}/state"
 
 EMBER_MANUFACTURER = "Ember"
+
+class MqttEmberMug:
+    '''
+    Wrapper class to hold the EmberMug and all associated state
+    '''
+    def __init__(self, mug: EmberMug) -> None:
+        self.mug: EmberMug = mug
+        self.update_listener_tasks: asyncio.TaskGroup = None
+
+    def topic_root(self) -> str:
+        return f"ember/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}"
+
+    def state_topic(self) -> str:
+        return f"{self.topic_root()}/state"
+
+    def mode_command_topic(self) -> str:
+        return f"{self.topic_root()}/power/set"
+
+    def temperature_command_topic(self) -> str:
+        return f"{self.topic_root()}/temperature/set"
+
+    def get_device_definition(self):
+        return {
+            # This connection may strictly not be a MAC if you are (for instance) running on
+            # MacOS where Bleak isn't allowed to acces the MAC information.
+            "connections": [("mac", self.mug.device.address)],
+            "model": self.mug.device.name,
+            "manufacturer": EMBER_MANUFACTURER,
+            "suggested_area": "Office",
+        }
+
+    def get_root_device(self) -> Dict[str, str]:
+        return {
+                    "name": self.mug.device.name,
+                    "mode_state_topic": self.state_topic(),
+                    "mode_state_template": "{{ value_json.power }}",
+                    "current_temperature_topic": self.state_topic(),
+                    "current_temperature_template": "{{ value_json.current_temperature }}",
+                    "temperature_state_topic": self.state_topic(),
+                    "temperature_state_template": "{{ value_json.desired_temperature }}",
+                    "availability_topic": self.state_topic(),
+                    "availability_template": "{{ value_json.availability }}",
+                    "mode_command_topic": self.mode_command_topic(),
+                    "temperature_command_topic": self.temperature_command_topic(),
+                    "modes": ["auto", "off"],
+                    "temperature_unit": "C" if self.mug.data.use_metric else "F",
+                    "temp_step": 1,
+                    "unique_id": self.mug.device.address,
+                    "device": self.get_device_definition(),
+                    "icon": "mdi:coffee",
+                    "max_temp": 62.5 if self.mug.data.use_metric else 145,
+                    "min_temp": 50 if self.mug.data.use_metric else 120,
+                }
+
+    def get_root_topic(self, discovery_prefix: str) -> str:
+        return f"{discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}/config"
 
 class EmberMqttBridge:
     def __init__(
@@ -54,6 +109,8 @@ class EmberMqttBridge:
 
         self.logger = logging.getLogger(__name__)
 
+        # Devices which we know about from seeing thier MQTT advertisements,
+        # but with which we may or may not be connected.
         self.known_devices = set()
         self.known_devices_lock = asyncio.Lock()
 
@@ -90,44 +147,14 @@ class EmberMqttBridge:
         """Clean up a MAC so it's suitable for use where colons aren't"""
         return mac.replace(":", "_")
 
-    def get_device_definition(self, mug: EmberMug):
-        return {
-            # This connection may strictly not be a MAC if you are (for instance) running on
-            # MacOS where Bleak isn't allowed to acces the MAC information.
-            "connections": [("mac", mug.device.address)],
-            "model": mug.device.name,
-            "manufacturer": EMBER_MANUFACTURER,
-            "suggested_area": "Office",
-        }
-
-    async def send_root_device(self, mqtt: Client, mug: EmberMug):
+    async def send_root_device(self, mqtt: Client, mug: MqttEmberMug):
         root_device_payload: MqttPayload = MqttPayload(
-            topic= f"{self.discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(mug.device.address)}/config",
-            payload={
-                "name": mug.device.name,
-                "mode_state_topic": mug.get_state_topic(),
-                "mode_state_template": "{{ value_json.power }}",
-                "current_temperature_topic": mug.get_state_topic(),
-                "current_temperature_template": "{{ value_json.current_temperature }}",
-                "temperature_state_topic": mug.get_state_topic(),
-                "temperature_state_template": "{{ value_json.desired_temperature }}",
-                "availability_topic": mug.get_state_topic(),
-                "availability_template": "{{ value_json.availability }}",
-                "mode_command_topic": f"{mug.get_topic()}/power/set",
-                "temperature_command_topic": f"{mug.get_topic()}/temperature/set",
-                "modes": ["auto", "off"],
-                "temperature_unit": "C" if mug.data.use_metric else "F",
-                "temp_step": 1,
-                "unique_id": mug.device.address,
-                "device": self.get_device_definition(mug),
-                "icon": "mdi:coffee",
-                "max_temp": 62.5 if mug.data.use_metric else 145,
-                "min_temp": 50 if mug.data.use_metric else 120,
-            })
+            topic= mug.get_root_topic(self.discovery_prefix),
+            payload=mug.get_root_device())
         await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
 
-    async def send_update(self, mqtt: Client, mug: EmberMug):
-        match mug.data.liquid_state:
+    async def send_update(self, mqtt: Client, mqtt_mug: MqttEmberMug):
+        match mqtt_mug.mug.data.liquid_state:
             case ember_mug_consts.LiquidState.HEATING:
                 mode = "auto"
             case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
@@ -138,12 +165,12 @@ class EmberMqttBridge:
                 mode = "off"
         state = {
             "power": mode,
-            "current_temperature": mug.data.current_temp,
-            "desired_temperature": mug.data.target_temp,
+            "current_temperature": mqtt_mug.mug.data.current_temp,
+            "desired_temperature": mqtt_mug.mug.data.target_temp,
             "availability": "online", # If we're sending this, the device must have been visible. Need to send a last will message when we lose connection.
         }
         update_payload: MqttPayload = MqttPayload(
-            topic=mug.get_state_topic(),
+            topic=mqtt_mug.state_topic(),
             payload=state
         )
         await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
@@ -177,7 +204,7 @@ class EmberMqttBridge:
                             await self.add_known_device(connections[0][1])
 
     async def start_mug_polling(self, mqtt: Client):
-        tracked_mugs = {}
+        tracked_mugs: Dict[str, MqttEmberMug] = {}
         while True:
             missing_mugs = [] # Paired mugs which we could not find
             visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()] # Find un-paired mugs in pairing mode
