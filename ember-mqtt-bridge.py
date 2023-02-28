@@ -17,9 +17,10 @@ import ember_mug.scanner as ember_mug_scanner
 from ember_mug.mug import EmberMug
 
 import argparse
-from exceptiongroup import ExceptionGroup, catch
 from collections import namedtuple
+from exceptiongroup import ExceptionGroup, catch
 import json
+import logging
 import yaml
 
 MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
@@ -47,6 +48,8 @@ class EmberMqttBridge:
         self.discovery_prefix = discovery_prefix
 
         self.validate_parameters()
+
+        self.logger = logging.getLogger(__name__)
 
         self.known_devices = set()
         self.known_devices_lock = asyncio.Lock()
