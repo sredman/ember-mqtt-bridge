@@ -121,8 +121,8 @@ class EmberMqttBridge:
                 "unique_id": mug.device.address,
                 "device": self.get_device_definition(mug),
                 "icon": "mdi:coffee",
-                "max_temp": 145,
-                "min_temp": 120,
+                "max_temp": 62.5 if mug.data.use_metric else 145,
+                "min_temp": 50 if mug.data.use_metric else 120,
             })
         await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
 
