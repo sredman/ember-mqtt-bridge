@@ -175,12 +175,12 @@ class EmberMqttBridge:
         )
         await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
 
-    async def send_update_offline(self, mqtt: Client, addr: str):
+    async def send_update_offline(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         state = {
             "availability": "offline"
         }
         update_payload: MqttPayload = MqttPayload(
-            topic=f"ember/{EmberMqttBridge.sanitise_mac(addr)}/state",
+            topic=mqtt_mug.state_topic(),
             payload=state
         )
         await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
@@ -215,7 +215,6 @@ class EmberMqttBridge:
                         pass # I guess it's not in range. Send an "offline" status update?
                         if addr in tracked_mugs:
                             missing_mugs.append(addr)
-                            del tracked_mugs[addr]
                     else:
                         if not addr in tracked_mugs:
                             tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
@@ -231,14 +230,17 @@ class EmberMqttBridge:
                     except BleakError as be:
                         if addr in tracked_mugs:
                             missing_mugs.append(addr)
-                            del tracked_mugs[addr]
                         logging.warning(f"Error while communicating with mug: {be}")
 
                 await mug.update_queued_attributes()
                 await self.send_update(mqtt, wrapped_mug)
 
-                for mug in missing_mugs:
-                    await self.send_update_offline(mqtt, addr)
+            for addr in missing_mugs:
+                wrapped_mug = tracked_mugs[addr]
+                del tracked_mugs[addr]
+                await self.send_update_offline(mqtt, wrapped_mug)
+                if wrapped_mug.listener_task is not None:
+                    wrapped_mug.listener_task.cancel()
 
             await asyncio.sleep(self.update_interval)
 
