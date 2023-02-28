@@ -218,28 +218,27 @@ class EmberMqttBridge:
                             del tracked_mugs[addr]
                     else:
                         if not addr in tracked_mugs:
-                            tracked_mugs[addr] = EmberMug(device)
-                        visible_mugs.append(tracked_mugs[addr])
-            async with asyncio.TaskGroup() as tg:
-                for mug in visible_mugs:
-                    # Using target_temp as a proxy for data being initialized.
-                    if mug.data.target_temp == 0:
-                        try:
-                            #async with mug.connection(): #TODO: Catch BleakError here and treat the mug as offline
-                            await mug.update_all()
-                            await mug.subscribe()
-                            tg.create_task(self.send_root_device(mqtt, mug))
-                        except BleakError as be:
-                            if addr in tracked_mugs:
-                                missing_mugs.append(addr)
-                                del tracked_mugs[addr]
-                            logging.warning(f"Error while communicating with mug: {be}")
+                            tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
+            for addr in tracked_mugs:
+                wrapped_mug: MqttEmberMug = tracked_mugs[addr]
+                mug: EmberMug = wrapped_mug.mug
+                # Using target_temp as a proxy for data being initialized.
+                if mug.data.target_temp == 0:
+                    try:
+                        await mug.update_all()
+                        await mug.subscribe()
+                        await self.send_root_device(mqtt, wrapped_mug)
+                    except BleakError as be:
+                        if addr in tracked_mugs:
+                            missing_mugs.append(addr)
+                            del tracked_mugs[addr]
+                        logging.warning(f"Error while communicating with mug: {be}")
 
-                    await mug.update_queued_attributes()
-                    tg.create_task(self.send_update(mqtt, mug))
+                await mug.update_queued_attributes()
+                await self.send_update(mqtt, wrapped_mug)
 
                 for mug in missing_mugs:
-                    tg.create_task(self.send_update_offline(mqtt, mug))
+                    await self.send_update_offline(mqtt, addr)
 
             await asyncio.sleep(self.update_interval)
 
