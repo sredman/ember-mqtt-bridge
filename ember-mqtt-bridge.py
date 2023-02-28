@@ -17,6 +17,7 @@ import ember_mug.scanner as ember_mug_scanner
 from ember_mug.mug import EmberMug
 
 import argparse
+from bleak import BleakError
 from collections import namedtuple
 from exceptiongroup import ExceptionGroup, catch
 import json
@@ -187,11 +188,16 @@ class EmberMqttBridge:
                 for mug in visible_mugs:
                     # Using target_temp as a proxy for data being initialized.
                     if mug.data.target_temp == 0:
-                        async with mug.connection():
+                        try:
+                            #async with mug.connection(): #TODO: Catch BleakError here and treat the mug as offline
                             await mug.update_all()
                             await mug.subscribe()
-                        tg.create_task(self.send_root_device(mqtt, mug))
-                        pass
+                            tg.create_task(self.send_root_device(mqtt, mug))
+                        except BleakError as be:
+                            if addr in tracked_mugs:
+                                missing_mugs.append(addr)
+                                del tracked_mugs[addr]
+                            logging.warning(f"Error while communicating with mug: {be}")
 
                     await mug.update_queued_attributes()
                     tg.create_task(self.send_update(mqtt, mug))
