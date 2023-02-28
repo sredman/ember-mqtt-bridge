@@ -36,7 +36,7 @@ class MqttEmberMug:
     '''
     def __init__(self, mug: EmberMug) -> None:
         self.mug: EmberMug = mug
-        self.update_listener_tasks: asyncio.TaskGroup = None
+        self.listener_task: asyncio.Task = None
 
     def topic_root(self) -> str:
         return f"ember/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}"
@@ -134,7 +134,6 @@ class EmberMqttBridge:
                     async with asyncio.TaskGroup() as tg:
                         tg.create_task(self.read_existing_mqtt_devices(client))
                         tg.create_task(self.start_mug_polling(client))
-                        tg.create_task(self.start_mqtt_listener(client))
             except MqttError as err:
                 self.logger.warning(f"MQTT connection failed with {err}")
                 await asyncio.sleep(self.retry_interval_secs)
@@ -226,6 +225,7 @@ class EmberMqttBridge:
                     try:
                         await mug.update_all()
                         await mug.subscribe()
+                        await self.start_mqtt_listener(mqtt, wrapped_mug)
                         await self.send_root_device(mqtt, wrapped_mug)
                     except BleakError as be:
                         if addr in tracked_mugs:
@@ -243,6 +243,18 @@ class EmberMqttBridge:
                     wrapped_mug.listener_task.cancel()
 
             await asyncio.sleep(self.update_interval)
+
+    async def start_mqtt_listener(self, mqtt: Client, mqtt_mug: MqttEmberMug) -> asyncio.Task:
+        async def worker():
+            async with mqtt.messages() as messages:
+                await mqtt.subscribe(f"{mqtt_mug.topic_root()}/+/set")
+                async for message in messages:
+                    if message.topic.value == mqtt_mug.mode_command_topic():
+                        pass
+                    elif message.topic.value == mqtt_mug.temperature_command_topic():
+                        pass
+        mqtt_mug.listener_task = asyncio.create_task(worker())
+        return mqtt_mug.listener_task
 
 def main():
     parser = argparse.ArgumentParser(
