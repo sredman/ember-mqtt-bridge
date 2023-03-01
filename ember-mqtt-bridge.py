@@ -293,8 +293,8 @@ class EmberMqttBridge:
                 try:
                     wrapped_mug: MqttEmberMug = self.tracked_mugs[addr]
                     mug: EmberMug = wrapped_mug.mug
-                    # Using target_temp as a proxy for data being initialized.
-                    if mug.data.target_temp == 0:
+                    # Using current_temp as a proxy for data being initialized.
+                    if mug.data.current_temp == 0:
                         await mug.update_all()
                         await mug.subscribe()
                         await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
