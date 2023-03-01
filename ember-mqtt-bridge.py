@@ -72,7 +72,7 @@ class MqttEmberMug:
                     "availability_template": "{{ value_json.availability }}",
                     "mode_command_topic": self.mode_command_topic(),
                     "temperature_command_topic": self.temperature_command_topic(),
-                    "modes": ["heat", "off"],
+                    "modes": ["auto", "off"],
                     "temperature_unit": "C" if self.mug.data.use_metric else "F",
                     "temp_step": 1,
                     "unique_id": self.mug.device.address,
@@ -132,9 +132,15 @@ class EmberMqttBridge:
                     username=self.mqtt_username,
                     password=self.mqtt_password,
                     ) as client:
-                    async with asyncio.TaskGroup() as tg:
-                        tg.create_task(self.start_mug_polling(client))
-                        tg.create_task(self.start_mqtt_listener(client))
+                    try:
+                        async with asyncio.TaskGroup() as tg:
+                            tg.create_task(self.start_mug_polling(client))
+                            tg.create_task(self.start_mqtt_listener(client))
+                    except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
+                        # We are closing down. Send out a notice that the devices we control are offline.
+                        for mqtt_mug in self.tracked_mugs.values():
+                            await self.send_update_offline(client, mqtt_mug)
+                        raise
             except MqttError as err:
                 self.logger.warning(f"MQTT connection failed with {err}")
                 await asyncio.sleep(self.retry_interval_secs)
@@ -156,11 +162,11 @@ class EmberMqttBridge:
     async def send_update(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         match mqtt_mug.mug.data.liquid_state:
             case ember_mug_consts.LiquidState.HEATING:
-                mode = "heat"
+                mode = "auto"
             case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
-                mode = "heat"
+                mode = "auto"
             case ember_mug_consts.LiquidState.COOLING:
-                mode = "heat"
+                mode = "auto"
             case other:
                 mode = "off"
         state = {
@@ -276,7 +282,13 @@ class EmberMqttBridge:
                         mqtt_mug = matching_mugs[0]
 
                         if message.topic.value == mqtt_mug.mode_command_topic():
-                            await mqtt_mug.mug.set_target_temp(0)
+                            if message.payload.decode() == "off":
+                                await mqtt_mug.mug.set_target_temp(0)
+                            else:
+                                # Not sure what to do here: The mug turns iteslf on when it has hot water in it.
+                                # For lack of a better idea, do SOMETHING. If there's no water in the mug, this
+                                # will likely have no effect.
+                                await mqtt_mug.mug.set_target_temp(100)
                         elif message.topic.value == mqtt_mug.temperature_command_topic():
                             await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
 
