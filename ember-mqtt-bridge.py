@@ -22,7 +22,7 @@ from collections import namedtuple
 from exceptiongroup import ExceptionGroup, catch
 import json
 import logging
-from typing import Dict
+from typing import Dict, List
 import yaml
 
 MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
@@ -82,8 +82,39 @@ class MqttEmberMug:
                     "min_temp": 50 if self.mug.data.use_metric else 120,
                 }
 
-    def get_root_topic(self, discovery_prefix: str) -> str:
+    def get_climate_topic(self, discovery_prefix: str) -> str:
         return f"{discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}/config"
+
+    def get_battery_entity(self, discovery_prefix: str) -> MqttPayload:
+        return MqttPayload(
+            topic= f"{discovery_prefix}/sensor/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}_battery/config",
+            payload={
+                "name": "Mug Battery",
+                "device_class": "battery",
+                "unit_of_measurement": "%",
+                "device": self.get_device_definition(),
+                "unique_id": f"{self.mug.device.address}_battery",
+                "availability_topic": self.state_topic(),
+                "availability_template": "{{ value_json.availability }}",
+                "state_topic": self.state_topic(),
+                "value_template": "{{ value_json.battery_percent }}",
+            }
+        )
+
+    def get_charging_entity(self, discovery_prefix: str) -> MqttPayload:
+        return MqttPayload(
+            topic= f"{discovery_prefix}/binary_sensor/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}_battery_charging/config",
+            payload={
+                "name": "Mug Battery Charging",
+                "device_class": "battery_charging",
+                "device": self.get_device_definition(),
+                "unique_id": f"{self.mug.device.address}_battery_charging",
+                "availability_topic": self.state_topic(),
+                "availability_template": "{{ value_json.availability }}",
+                "state_topic": self.state_topic(),
+                "value_template": "{{ value_json.battery_charging }}",
+            }
+        )
 
     async def send_update(self, mqtt: Client, online: bool):
         await self.mug.update_queued_attributes()
@@ -101,6 +132,8 @@ class MqttEmberMug:
             "current_temperature": self.mug.data.current_temp,
             "desired_temperature": self.mug.data.target_temp,
             "availability": "online" if online else "offline",
+            "battery_percent": (await self.mug.get_battery()).percent,
+            "battery_charging": "ON" if (await self.mug.get_battery()).on_charging_base else "OFF",
         }
         update_payload: MqttPayload = MqttPayload(
             topic=self.state_topic(),
@@ -177,10 +210,15 @@ class EmberMqttBridge:
         return mac.replace(":", "_")
 
     async def send_entity_discovery(self, mqtt: Client, mug: MqttEmberMug):
-        root_entity_payload: MqttPayload = MqttPayload(
-            topic= mug.get_root_topic(self.discovery_prefix),
-            payload=mug.get_climate_entity())
-        await mqtt.publish(root_entity_payload.topic, json.dumps(root_entity_payload.payload), retain=True)
+        entities: List[MqttPayload] = [
+            MqttPayload(
+                topic=mug.get_climate_topic(self.discovery_prefix),
+                payload=mug.get_climate_entity()),
+            mug.get_battery_entity(self.discovery_prefix),
+            mug.get_charging_entity(self.discovery_prefix),
+        ]
+        for entity in entities:
+            await mqtt.publish(entity.topic, json.dumps(entity.payload), retain=True)
 
     async def subscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
