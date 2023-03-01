@@ -133,7 +133,6 @@ class EmberMqttBridge:
                     password=self.mqtt_password,
                     ) as client:
                     async with asyncio.TaskGroup() as tg:
-                        tg.create_task(self.read_existing_mqtt_devices(client))
                         tg.create_task(self.start_mug_polling(client))
                         tg.create_task(self.start_mqtt_listener(client))
             except MqttError as err:
@@ -198,24 +197,6 @@ class EmberMqttBridge:
         '''
         await mqtt.unsubscribe(f"{mqtt_mug.topic_root()}/+/set")
 
-    async def read_existing_mqtt_devices(self, mqtt: Client):
-        '''
-        Look for MQTT messages indicating devices which have been discovered in the past,
-        which we should be on the lookout for.
-        These devices may be from other Ember bridges running on the same MQTT server,
-        so we _cannot_ expect that they are paired.
-        '''
-        async with mqtt.messages() as messages:
-            await mqtt.subscribe(f"{self.discovery_prefix}/#")
-            async for message in messages:
-                data = json.loads(message.payload)
-                if data and "device" in data:
-                    device = data["device"]
-                    if "connections" in device and "manufacturer" in device:
-                        if device["manufacturer"] == EMBER_MANUFACTURER:
-                            connections = device["connections"]
-                            await self.add_known_device(connections[0][1])
-
     async def start_mug_polling(self, mqtt: Client):
         while True:
             missing_mugs = [] # Paired mugs which we could not find
@@ -263,22 +244,41 @@ class EmberMqttBridge:
 
     async def start_mqtt_listener(self, mqtt: Client):
         async with mqtt.messages() as messages:
+            await mqtt.subscribe(f"{self.discovery_prefix}/#") # Listen for knowledge of mugs we cannot see
             async for message in messages:
-                # Get the mug to which this message belongs
-                # There is certainly a better way to do this but I am lazy
-                matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if message.topic.value.startswith(wrapped_mug.topic_root())]
-                if len(matching_mugs) == 0:
-                    logging.error(f"No mugs matched {message.topic.value}. This is a bug.")
-                elif len(matching_mugs) > 1:
-                    logging.error(f"More than one mug matched {message.topic.value}. This is a bug.")
-                else:
-                    mqtt_mug = matching_mugs[0]
+                if message.topic.value.startswith(f"{self.discovery_prefix}"):
+                    '''
+                    Look for MQTT messages indicating devices which have been discovered in the past,
+                    which we should be on the lookout for.
+                    These devices may be from other Ember bridges running on the same MQTT server,
+                    so we _cannot_ expect that they are paired.
+                    '''
+                    data = json.loads(message.payload)
+                    if data and "device" in data:
+                        device = data["device"]
+                        if "connections" in device and "manufacturer" in device:
+                            if device["manufacturer"] == EMBER_MANUFACTURER:
+                                connections = device["connections"]
+                                await self.add_known_device(connections[0][1])
+                if message.topic.value.startswith("ember") and message.topic.value.endswith("set"):
+                    '''
+                    Look for messages indicating a command from the user.
+                    TODO: Make this section accept mugs which are handled by another MQTT instance
+                    '''
+                    # Get the mug to which this message belongs
+                    # There is certainly a better way to do this but I am lazy
+                    matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if message.topic.value.startswith(wrapped_mug.topic_root())]
+                    if len(matching_mugs) == 0:
+                        logging.error(f"No mugs matched {message.topic.value}. This is a bug.")
+                    elif len(matching_mugs) > 1:
+                        logging.error(f"More than one mug matched {message.topic.value}. This is a bug.")
+                    else:
+                        mqtt_mug = matching_mugs[0]
 
-                    if message.topic.value == mqtt_mug.mode_command_topic():
-                        pass
-                    elif message.topic.value == mqtt_mug.temperature_command_topic():
-                        pass
-                        await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
+                        if message.topic.value == mqtt_mug.mode_command_topic():
+                            pass
+                        elif message.topic.value == mqtt_mug.temperature_command_topic():
+                            pass
 
 def main():
     parser = argparse.ArgumentParser(
