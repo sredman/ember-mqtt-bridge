@@ -281,6 +281,10 @@ class EmberMqttBridge:
                                 await mqtt_mug.mug.set_target_temp(100)
                         elif message.topic.value == mqtt_mug.temperature_command_topic():
                             await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
+                        else:
+                            logging.error(f"Unsupported command {message.topic.value}.")
+
+                        await mqtt_mug.send_update(mqtt, online=True)
 
 def main():
     parser = argparse.ArgumentParser(
