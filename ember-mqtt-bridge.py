@@ -274,11 +274,14 @@ class EmberMqttBridge:
                         if message.topic.value == mqtt_mug.mode_command_topic():
                             if message.payload.decode() == "off":
                                 await mqtt_mug.mug.set_target_temp(0)
+                                 # Hack the liquid state, because otherwise we won't get the state update right away.
+                                mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.WARM_NO_TEMP_CONTROL
                             else:
                                 # Not sure what to do here: The mug turns iteslf on when it has hot water in it.
                                 # For lack of a better idea, do SOMETHING. If there's no water in the mug, this
                                 # will likely have no effect.
                                 await mqtt_mug.mug.set_target_temp(100)
+                                mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
                         elif message.topic.value == mqtt_mug.temperature_command_topic():
                             await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
                         else:
