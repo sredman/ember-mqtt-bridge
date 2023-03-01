@@ -72,7 +72,7 @@ class MqttEmberMug:
                     "availability_template": "{{ value_json.availability }}",
                     "mode_command_topic": self.mode_command_topic(),
                     "temperature_command_topic": self.temperature_command_topic(),
-                    "modes": ["auto", "off"],
+                    "modes": ["heat", "off"],
                     "temperature_unit": "C" if self.mug.data.use_metric else "F",
                     "temp_step": 1,
                     "unique_id": self.mug.device.address,
@@ -156,11 +156,11 @@ class EmberMqttBridge:
     async def send_update(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         match mqtt_mug.mug.data.liquid_state:
             case ember_mug_consts.LiquidState.HEATING:
-                mode = "auto"
+                mode = "heat"
             case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
-                mode = "auto"
+                mode = "heat"
             case ember_mug_consts.LiquidState.COOLING:
-                mode = "auto"
+                mode = "heat"
             case other:
                 mode = "off"
         state = {
@@ -276,9 +276,9 @@ class EmberMqttBridge:
                         mqtt_mug = matching_mugs[0]
 
                         if message.topic.value == mqtt_mug.mode_command_topic():
-                            pass
+                            await mqtt_mug.mug.set_target_temp(0)
                         elif message.topic.value == mqtt_mug.temperature_command_topic():
-                            pass
+                            await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
 
 def main():
     parser = argparse.ArgumentParser(
