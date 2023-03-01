@@ -86,6 +86,7 @@ class MqttEmberMug:
         return f"{discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}/config"
 
     async def send_update(self, mqtt: Client, online: bool):
+        await self.mug.update_queued_attributes()
         match self.mug.data.liquid_state:
             case ember_mug_consts.LiquidState.HEATING:
                 mode = "auto"
@@ -222,7 +223,6 @@ class EmberMqttBridge:
                         await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
                         await self.send_root_device(mqtt, wrapped_mug)
 
-                    await mug.update_queued_attributes()
                     await wrapped_mug.send_update(mqtt, online=True)
 
                 except BleakError as be:
