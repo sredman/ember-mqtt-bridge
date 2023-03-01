@@ -59,7 +59,7 @@ class MqttEmberMug:
             "suggested_area": "Office",
         }
 
-    def get_root_device(self) -> Dict[str, str]:
+    def get_climate_entity(self) -> Dict[str, str]:
         return {
                     "name": self.mug.device.name,
                     "mode_state_topic": self.state_topic(),
@@ -176,11 +176,11 @@ class EmberMqttBridge:
         """Clean up a MAC so it's suitable for use where colons aren't"""
         return mac.replace(":", "_")
 
-    async def send_root_device(self, mqtt: Client, mug: MqttEmberMug):
-        root_device_payload: MqttPayload = MqttPayload(
+    async def send_entity_discovery(self, mqtt: Client, mug: MqttEmberMug):
+        root_entity_payload: MqttPayload = MqttPayload(
             topic= mug.get_root_topic(self.discovery_prefix),
-            payload=mug.get_root_device())
-        await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
+            payload=mug.get_climate_entity())
+        await mqtt.publish(root_entity_payload.topic, json.dumps(root_entity_payload.payload), retain=True)
 
     async def subscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
@@ -221,7 +221,7 @@ class EmberMqttBridge:
                         await mug.update_all()
                         await mug.subscribe()
                         await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
-                        await self.send_root_device(mqtt, wrapped_mug)
+                        await self.send_entity_discovery(mqtt, wrapped_mug)
 
                     await wrapped_mug.send_update(mqtt, online=True)
 
