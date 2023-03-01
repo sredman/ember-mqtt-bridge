@@ -85,6 +85,28 @@ class MqttEmberMug:
     def get_root_topic(self, discovery_prefix: str) -> str:
         return f"{discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}/config"
 
+    async def send_update(self, mqtt: Client, online: bool):
+        match self.mug.data.liquid_state:
+            case ember_mug_consts.LiquidState.HEATING:
+                mode = "auto"
+            case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
+                mode = "auto"
+            case ember_mug_consts.LiquidState.COOLING:
+                mode = "auto"
+            case other:
+                mode = "off"
+        state = {
+            "power": mode,
+            "current_temperature": self.mug.data.current_temp,
+            "desired_temperature": self.mug.data.target_temp,
+            "availability": "online" if online else "offline",
+        }
+        update_payload: MqttPayload = MqttPayload(
+            topic=self.state_topic(),
+            payload=state
+        )
+        await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
+
 class EmberMqttBridge:
     def __init__(
         self,
@@ -139,7 +161,7 @@ class EmberMqttBridge:
                     except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
                         # We are closing down. Send out a notice that the devices we control are offline.
                         for mqtt_mug in self.tracked_mugs.values():
-                            await self.send_update_offline(client, mqtt_mug)
+                            await mqtt_mug.send_update(client, online=False)
                         raise
             except MqttError as err:
                 self.logger.warning(f"MQTT connection failed with {err}")
@@ -159,43 +181,11 @@ class EmberMqttBridge:
             payload=mug.get_root_device())
         await mqtt.publish(root_device_payload.topic, json.dumps(root_device_payload.payload), retain=True)
 
-    async def send_update(self, mqtt: Client, mqtt_mug: MqttEmberMug):
-        match mqtt_mug.mug.data.liquid_state:
-            case ember_mug_consts.LiquidState.HEATING:
-                mode = "auto"
-            case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
-                mode = "auto"
-            case ember_mug_consts.LiquidState.COOLING:
-                mode = "auto"
-            case other:
-                mode = "off"
-        state = {
-            "power": mode,
-            "current_temperature": mqtt_mug.mug.data.current_temp,
-            "desired_temperature": mqtt_mug.mug.data.target_temp,
-            "availability": "online", # If we're sending this, the device must have been visible. Need to send a last will message when we lose connection.
-        }
-        update_payload: MqttPayload = MqttPayload(
-            topic=mqtt_mug.state_topic(),
-            payload=state
-        )
-        await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
-
     async def subscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
         Subscribe to the update topics for the given mug.
         '''
         await mqtt.subscribe(f"{mqtt_mug.topic_root()}/+/set")
-
-    async def send_update_offline(self, mqtt: Client, mqtt_mug: MqttEmberMug):
-        state = {
-            "availability": "offline"
-        }
-        update_payload: MqttPayload = MqttPayload(
-            topic=mqtt_mug.state_topic(),
-            payload=state
-        )
-        await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
 
     async def unsubscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
@@ -233,7 +223,7 @@ class EmberMqttBridge:
                         await self.send_root_device(mqtt, wrapped_mug)
 
                     await mug.update_queued_attributes()
-                    await self.send_update(mqtt, wrapped_mug)
+                    await wrapped_mug.send_update(mqtt, online=True)
 
                 except BleakError as be:
                     if addr in self.tracked_mugs:
@@ -243,7 +233,7 @@ class EmberMqttBridge:
             for addr in missing_mugs:
                 wrapped_mug = self.tracked_mugs[addr]
                 del self.tracked_mugs[addr]
-                await self.send_update_offline(mqtt, wrapped_mug)
+                await wrapped_mug.send_update(mqtt, online=False)
                 await self.unsubscribe_mqtt_topic(mqtt, wrapped_mug)
 
             await asyncio.sleep(self.update_interval)
