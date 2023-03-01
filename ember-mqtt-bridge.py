@@ -105,6 +105,8 @@ class EmberMqttBridge:
 
         self.validate_parameters()
 
+        self.tracked_mugs: Dict[str, MqttEmberMug] = {}
+
         self.retry_interval_secs = 1
 
         self.logger = logging.getLogger(__name__)
@@ -203,14 +205,13 @@ class EmberMqttBridge:
                             await self.add_known_device(connections[0][1])
 
     async def start_mug_polling(self, mqtt: Client):
-        tracked_mugs: Dict[str, MqttEmberMug] = {}
         while True:
             missing_mugs = [] # Paired mugs which we could not find
             visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()] # Find un-paired mugs in pairing mode
             async with self.known_devices_lock:
                 for addr in self.known_devices:
-                    if addr in tracked_mugs:
-                        if tracked_mugs[addr].mug._client.is_connected:
+                    if addr in self.tracked_mugs:
+                        if self.tracked_mugs[addr].mug._client.is_connected:
                             pass # Already connected, nothing to do
                         else:
                             missing_mugs.append(addr)
@@ -219,29 +220,30 @@ class EmberMqttBridge:
                         if device is None:
                             pass # I guess it's not in range. Send an "offline" status update?
                         else:
-                            if not addr in tracked_mugs:
-                                tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
-            for addr in tracked_mugs:
-                wrapped_mug: MqttEmberMug = tracked_mugs[addr]
-                mug: EmberMug = wrapped_mug.mug
-                # Using target_temp as a proxy for data being initialized.
-                if mug.data.target_temp == 0:
-                    try:
+                            if not addr in self.tracked_mugs:
+                                self.tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
+            for addr in self.tracked_mugs:
+                try:
+                    wrapped_mug: MqttEmberMug = self.tracked_mugs[addr]
+                    mug: EmberMug = wrapped_mug.mug
+                    # Using target_temp as a proxy for data being initialized.
+                    if mug.data.target_temp == 0:
                         await mug.update_all()
                         await mug.subscribe()
                         await self.start_mqtt_listener(mqtt, wrapped_mug)
                         await self.send_root_device(mqtt, wrapped_mug)
-                    except BleakError as be:
-                        if addr in tracked_mugs:
-                            missing_mugs.append(addr)
-                        logging.warning(f"Error while communicating with mug: {be}")
 
-                await mug.update_queued_attributes()
-                await self.send_update(mqtt, wrapped_mug)
+                    await mug.update_queued_attributes()
+                    await self.send_update(mqtt, wrapped_mug)
+
+                except BleakError as be:
+                    if addr in self.tracked_mugs:
+                        missing_mugs.append(addr)
+                    logging.warning(f"Error while communicating with mug: {be}")
 
             for addr in missing_mugs:
-                wrapped_mug = tracked_mugs[addr]
-                del tracked_mugs[addr]
+                wrapped_mug = self.tracked_mugs[addr]
+                del self.tracked_mugs[addr]
                 await self.send_update_offline(mqtt, wrapped_mug)
                 if wrapped_mug.listener_task is not None:
                     wrapped_mug.listener_task.cancel()
