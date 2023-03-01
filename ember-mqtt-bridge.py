@@ -14,6 +14,7 @@ from asyncio_mqtt import Client, MqttError
 
 import ember_mug.consts as ember_mug_consts
 import ember_mug.scanner as ember_mug_scanner
+import ember_mug.data as ember_mug_data
 from ember_mug.mug import EmberMug
 
 import argparse
@@ -48,6 +49,15 @@ class MqttEmberMug:
 
     def temperature_command_topic(self) -> str:
         return f"{self.topic_root()}/temperature/set"
+
+    def led_command_topic(self) -> str:
+        return f"{self.topic_root()}/led/set"
+
+    def led_brightness_command_topic(self) -> str:
+        return f"{self.topic_root()}/led_brightness/set"
+
+    def led_color_command_topic(self) -> str:
+        return f"{self.topic_root()}/led_color/set"
 
     def get_device_definition(self):
         return {
@@ -116,6 +126,31 @@ class MqttEmberMug:
             }
         )
 
+    def get_led_entity(self, discovery_prefix: str) -> MqttPayload:
+        return MqttPayload(
+            topic= f"{discovery_prefix}/light/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}_led/config",
+            payload={
+                "name": "Mug LED",
+                "device_class": "battery_charging",
+                "device": self.get_device_definition(),
+                "unique_id": f"{self.mug.device.address}_led",
+                "optimistic": False,
+                "availability_topic": self.state_topic(),
+                "availability_template": "{{ value_json.availability }}",
+                "state_topic": self.state_topic(),
+                "state_value_template": "{{ value_json.led }}",
+                # You cannot control the on/off state of the LED, but this is a required field.
+                "command_topic": self.led_command_topic(),
+                # You cannot actually control the brightness of the mug LED, but if you don't have this here,
+                # the HomeAssistant GUI only shows you a brightness slider, and it sends updates to the colour using that.
+                "brightness_command_topic": self.led_brightness_command_topic(),
+                "rgb_command_topic": self.led_color_command_topic(),
+                "rgb_command_template": "{{ red,green,blue }}",
+                "rgb_state_topic": self.state_topic(),
+                "rgb_value_template": "{{ value_json.led_rgb }}",
+            }
+        )
+
     async def send_update(self, mqtt: Client, online: bool):
         await self.mug.update_queued_attributes()
         match self.mug.data.liquid_state:
@@ -127,6 +162,7 @@ class MqttEmberMug:
                 mode = "auto"
             case other:
                 mode = "off"
+        led_color: ember_mug_data.Colour = await self.mug.get_led_colour()
         state = {
             "power": mode,
             "current_temperature": self.mug.data.current_temp,
@@ -134,6 +170,8 @@ class MqttEmberMug:
             "availability": "online" if online else "offline",
             "battery_percent": (await self.mug.get_battery()).percent,
             "battery_charging": "ON" if (await self.mug.get_battery()).on_charging_base else "OFF",
+            "led": "ON", # The LED on the mug is always on. Necessary to say so in order to get Home Assistant to behave.
+            "led_rgb": f"{led_color.red},{led_color.green},{led_color.blue}",
         }
         update_payload: MqttPayload = MqttPayload(
             topic=self.state_topic(),
@@ -216,6 +254,7 @@ class EmberMqttBridge:
                 payload=mug.get_climate_entity()),
             mug.get_battery_entity(self.discovery_prefix),
             mug.get_charging_entity(self.discovery_prefix),
+            mug.get_led_entity(self.discovery_prefix),
         ]
         for entity in entities:
             await mqtt.publish(entity.topic, json.dumps(entity.payload), retain=True)
@@ -322,6 +361,9 @@ class EmberMqttBridge:
                                 mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
                         elif message.topic.value == mqtt_mug.temperature_command_topic():
                             await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
+                        elif message.topic.value == mqtt_mug.led_color_command_topic():
+                            r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
+                            await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
                         else:
                             logging.error(f"Unsupported command {message.topic.value}.")
 
