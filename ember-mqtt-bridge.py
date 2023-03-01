@@ -36,7 +36,6 @@ class MqttEmberMug:
     '''
     def __init__(self, mug: EmberMug) -> None:
         self.mug: EmberMug = mug
-        self.listener_task: asyncio.Task = None
 
     def topic_root(self) -> str:
         return f"ember/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}"
@@ -136,6 +135,7 @@ class EmberMqttBridge:
                     async with asyncio.TaskGroup() as tg:
                         tg.create_task(self.read_existing_mqtt_devices(client))
                         tg.create_task(self.start_mug_polling(client))
+                        tg.create_task(self.start_mqtt_listener(client))
             except MqttError as err:
                 self.logger.warning(f"MQTT connection failed with {err}")
                 await asyncio.sleep(self.retry_interval_secs)
@@ -176,6 +176,12 @@ class EmberMqttBridge:
         )
         await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
 
+    async def subscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
+        '''
+        Subscribe to the update topics for the given mug.
+        '''
+        await mqtt.subscribe(f"{mqtt_mug.topic_root()}/+/set")
+
     async def send_update_offline(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         state = {
             "availability": "offline"
@@ -185,6 +191,12 @@ class EmberMqttBridge:
             payload=state
         )
         await mqtt.publish(update_payload.topic, json.dumps(update_payload.payload))
+
+    async def unsubscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
+        '''
+        Unsubscribe from the update topics for the given mug
+        '''
+        await mqtt.unsubscribe(f"{mqtt_mug.topic_root()}/+/set")
 
     async def read_existing_mqtt_devices(self, mqtt: Client):
         '''
@@ -230,7 +242,7 @@ class EmberMqttBridge:
                     if mug.data.target_temp == 0:
                         await mug.update_all()
                         await mug.subscribe()
-                        await self.start_mqtt_listener(mqtt, wrapped_mug)
+                        await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
                         await self.send_root_device(mqtt, wrapped_mug)
 
                     await mug.update_queued_attributes()
@@ -245,22 +257,28 @@ class EmberMqttBridge:
                 wrapped_mug = self.tracked_mugs[addr]
                 del self.tracked_mugs[addr]
                 await self.send_update_offline(mqtt, wrapped_mug)
-                if wrapped_mug.listener_task is not None:
-                    wrapped_mug.listener_task.cancel()
+                await self.unsubscribe_mqtt_topic(mqtt, wrapped_mug)
 
             await asyncio.sleep(self.update_interval)
 
-    async def start_mqtt_listener(self, mqtt: Client, mqtt_mug: MqttEmberMug) -> asyncio.Task:
-        async def worker():
-            async with mqtt.messages() as messages:
-                await mqtt.subscribe(f"{mqtt_mug.topic_root()}/+/set")
-                async for message in messages:
+    async def start_mqtt_listener(self, mqtt: Client):
+        async with mqtt.messages() as messages:
+            async for message in messages:
+                # Get the mug to which this message belongs
+                # There is certainly a better way to do this but I am lazy
+                matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if message.topic.value.startswith(wrapped_mug.topic_root())]
+                if len(matching_mugs) == 0:
+                    logging.error(f"No mugs matched {message.topic.value}. This is a bug.")
+                elif len(matching_mugs) > 1:
+                    logging.error(f"More than one mug matched {message.topic.value}. This is a bug.")
+                else:
+                    mqtt_mug = matching_mugs[0]
+
                     if message.topic.value == mqtt_mug.mode_command_topic():
                         pass
                     elif message.topic.value == mqtt_mug.temperature_command_topic():
                         pass
-        mqtt_mug.listener_task = asyncio.create_task(worker())
-        return mqtt_mug.listener_task
+                        await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
 
 def main():
     parser = argparse.ArgumentParser(
