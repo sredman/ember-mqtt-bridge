@@ -209,14 +209,18 @@ class EmberMqttBridge:
             visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()] # Find un-paired mugs in pairing mode
             async with self.known_devices_lock:
                 for addr in self.known_devices:
-                    device = await ember_mug_scanner.find_mug(addr) # Find paired mugs
-                    if device is None:
-                        pass # I guess it's not in range. Send an "offline" status update?
-                        if addr in tracked_mugs:
+                    if addr in tracked_mugs:
+                        if tracked_mugs[addr].mug._client.is_connected:
+                            pass # Already connected, nothing to do
+                        else:
                             missing_mugs.append(addr)
                     else:
-                        if not addr in tracked_mugs:
-                            tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
+                        device = await ember_mug_scanner.find_mug(addr) # Find paired mugs
+                        if device is None:
+                            pass # I guess it's not in range. Send an "offline" status update?
+                        else:
+                            if not addr in tracked_mugs:
+                                tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
             for addr in tracked_mugs:
                 wrapped_mug: MqttEmberMug = tracked_mugs[addr]
                 mug: EmberMug = wrapped_mug.mug
