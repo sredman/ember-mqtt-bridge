@@ -319,7 +319,8 @@ class EmberMqttBridge:
         async with mqtt.messages() as messages:
             await mqtt.subscribe(f"{self.discovery_prefix}/#") # Listen for knowledge of mugs we cannot see
             async for message in messages:
-                if message.topic.value.startswith(f"{self.discovery_prefix}"):
+                topic = message.topic.value
+                if topic.startswith(f"{self.discovery_prefix}"):
                     '''
                     Look for MQTT messages indicating devices which have been discovered in the past,
                     which we should be on the lookout for.
@@ -333,22 +334,22 @@ class EmberMqttBridge:
                             if device["manufacturer"] == EMBER_MANUFACTURER:
                                 connections = device["connections"]
                                 await self.add_known_device(connections[0][1])
-                if message.topic.value.startswith("ember") and message.topic.value.endswith("set"):
+                if topic.startswith("ember") and topic.endswith("set"):
                     '''
                     Look for messages indicating a command from the user.
                     TODO: Make this section accept mugs which are handled by another MQTT instance
                     '''
                     # Get the mug to which this message belongs
                     # There is certainly a better way to do this but I am lazy
-                    matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if message.topic.value.startswith(wrapped_mug.topic_root())]
+                    matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
                     if len(matching_mugs) == 0:
-                        logging.error(f"No mugs matched {message.topic.value}. This is a bug.")
+                        logging.error(f"No mugs matched {topic}. This is a bug.")
                     elif len(matching_mugs) > 1:
-                        logging.error(f"More than one mug matched {message.topic.value}. This is a bug.")
+                        logging.error(f"More than one mug matched {topic}. This is a bug.")
                     else:
                         mqtt_mug = matching_mugs[0]
 
-                        if message.topic.value == mqtt_mug.mode_command_topic():
+                        if topic == mqtt_mug.mode_command_topic():
                             if message.payload.decode() == "off":
                                 await mqtt_mug.mug.set_target_temp(0)
                                  # Hack the liquid state, because otherwise we won't get the state update right away.
@@ -359,13 +360,13 @@ class EmberMqttBridge:
                                 # will likely have no effect.
                                 await mqtt_mug.mug.set_target_temp(100)
                                 mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
-                        elif message.topic.value == mqtt_mug.temperature_command_topic():
+                        elif topic == mqtt_mug.temperature_command_topic():
                             await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
-                        elif message.topic.value == mqtt_mug.led_color_command_topic():
+                        elif topic == mqtt_mug.led_color_command_topic():
                             r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
                             await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
                         else:
-                            logging.error(f"Unsupported command {message.topic.value}.")
+                            logging.error(f"Unsupported command {topic}.")
 
                         await mqtt_mug.send_update(mqtt, online=True)
 
