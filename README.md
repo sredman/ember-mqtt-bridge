@@ -9,10 +9,8 @@ Provides autoconfiguration messages for Home Assistant.
 
 ## Features
 
-Automatically connects with any mug in pairing mode (hopefully your neighbors want that!),
-and allows control over the temperature and the LED color. Allows turning the heater off,
-though turning it back on is somewhat trickier (it seems the mug needs to have water in
-order for it to allow you to turn on the heater).
+Allows control over the mug temperature and the LED color. Allows turning the heater off,
+though turning it back on can be flaky if the mug doesn't believe it has anything in it.
 
 ## Usage
 
@@ -23,6 +21,11 @@ Simply run the executable, like:
 If you like, you can override some parameters on the command line:
 
 `./ember-mqtt-bridge.py --config-file=./ember-mqtt-bridge.config.yml --mqtt-password:$password`
+
+## Pairing
+
+To pair a mug, put it in pairing mode. The bridge will present a pairing button. Find that in
+your Home Assistant interface, and press it. The mug will be picked up in the next iteration (or two).
 
 ## Notes
 

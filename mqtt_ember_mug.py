@@ -60,10 +60,14 @@ class MqttEmberMug:
     def led_color_command_topic(self) -> str:
         return f"{self.topic_root()}/led_color/set"
 
+    def pairing_button_command_topic(self) -> str:
+        return f"{self.topic_root()}/pairing_button/set"
+
     def get_device_definition(self):
         return {
             # This connection may strictly not be a MAC if you are (for instance) running on
             # MacOS where Bleak isn't allowed to acces the MAC information.
+            "name": self.mug.device.name,
             "connections": [("mac", self.mug.device.address)],
             "model": self.mug.device.name,
             "manufacturer": EMBER_MANUFACTURER,
@@ -150,6 +154,19 @@ class MqttEmberMug:
                 "rgb_state_topic": self.state_topic(),
                 "rgb_value_template": "{{ value_json.led_rgb }}",
             }
+        )
+
+    def get_pairing_button_entity(self, discovery_prefix: str) -> MqttPayload:
+        return MqttPayload(
+            topic= f"{discovery_prefix}/button/{self.sanitised_mac()}/pairing_button/config",
+            payload={
+                "name": f"Pair With Device",
+                "device": self.get_device_definition(),
+                "unique_id": f"{self.mug.device.address}_pairing_button",
+                "icon": "mdi:coffee-off-outline",
+                "command_topic": self.pairing_button_command_topic(),
+            },
+            retain=False
         )
 
     async def send_update(self, mqtt: Client, online: bool):

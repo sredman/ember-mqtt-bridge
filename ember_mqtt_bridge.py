@@ -47,6 +47,7 @@ class EmberMqttBridge:
         self.validate_parameters()
 
         self.tracked_mugs: Dict[str, MqttEmberMug] = {}
+        self.unpaired_mugs: Dict[str, MqttEmberMug] = {}
 
         self.retry_interval_secs = 1
 
@@ -82,6 +83,8 @@ class EmberMqttBridge:
                         # We are closing down. Send out a notice that the devices we control are offline.
                         for mqtt_mug in self.tracked_mugs.values():
                             await mqtt_mug.send_update(client, online=False)
+                        for mqtt_mug in self.unpaired_mugs.values():
+                            await self.remove_unpaired_mug(client, mqtt_mug)
                         raise
             except MqttError as err:
                 self.logger.warning(f"MQTT connection failed with {err}")
@@ -100,6 +103,13 @@ class EmberMqttBridge:
         ]
         for entity in entities:
             await mqtt.publish(entity.topic, json.dumps(entity.payload), retain=entity.retain)
+
+    async def send_unpaired_entity_discovery(self, mqtt: Client, mug: MqttEmberMug):
+        entities: List[MqttPayload] = [
+            mug.get_pairing_button_entity(self.discovery_prefix),
+        ]
+        for entity in entities:
+            await mqtt.publish(entity.topic, json.dumps(entity.payload), retain=False)
 
     async def subscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
@@ -122,10 +132,36 @@ class EmberMqttBridge:
         await mqtt_mug.send_update(mqtt, online=False)
         await self.unsubscribe_mqtt_topic(mqtt, mqtt_mug)
 
+    async def remove_unpaired_mug(self, mqtt: Client, mqtt_mug: MqttEmberMug):
+        '''
+        Clean up everything which should be cleaned up when we lose connection
+        with a mug with which we were not paired.
+        '''
+        await self.unsubscribe_mqtt_topic(mqtt, mqtt_mug)
+        entities: List[MqttPayload] = [
+            mqtt_mug.get_pairing_button_entity(self.discovery_prefix),
+        ]
+        for entity in entities:
+            await mqtt.publish(entity.topic, None, retain=False)
+
     async def start_mug_polling(self, mqtt: Client):
         while True:
+            unpaired_devices = [device for device in await ember_mug_scanner.discover_mugs()] # Find mugs in pairing mode
+            for unpaired_device in unpaired_devices:
+                if unpaired_device.address in self.known_devices:
+                    # This is a device with which we are paired, either due to the pairing having been broken
+                    # or due to another device on the same MQTT network having paired.
+                    # Presumably, the user wants us to connect to this device as well.
+                    # (To prevent this from hapening, delete the device in Home Assistant or manually remove the MQTT topic.)
+                    async with EmberMug(unpaired_device).connection():
+                        pass # Connecting the bluetooth is sufficient. The next iteration will handle everything correctly.
+                elif not unpaired_device.address in self.unpaired_mugs:
+                    wrapped_mug = MqttEmberMug(EmberMug(unpaired_device))
+                    self.unpaired_mugs[unpaired_device.address] = wrapped_mug
+                    await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
+                    await self.send_unpaired_entity_discovery(mqtt, wrapped_mug)
+
             missing_mugs = [] # Paired mugs which we could not find
-            visible_mugs = [EmberMug(mug) for mug in await ember_mug_scanner.discover_mugs()] # Find un-paired mugs in pairing mode
             async with self.known_devices_lock:
                 for addr in self.known_devices:
                     if addr in self.tracked_mugs:
@@ -138,7 +174,7 @@ class EmberMqttBridge:
                         if device is None:
                             pass # I guess it's not in range. Send an "offline" status update?
                         else:
-                            if not addr in self.tracked_mugs:
+                            if not addr in self.tracked_mugs and device.details['props']['Paired']:
                                 self.tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
             for addr in self.tracked_mugs:
                 try:
@@ -175,6 +211,18 @@ class EmberMqttBridge:
                 wrapped_mug = self.tracked_mugs[addr]
                 await self.handle_mug_disconnect(mqtt, wrapped_mug)
 
+            gone_unpaired_device_addresses = set()
+            unpaired_device_addresses = [device.address for device in unpaired_devices]
+            for unpaired_address in self.unpaired_mugs:
+                # Clean up any unpaired devices we no longer see
+                if not unpaired_address in unpaired_device_addresses:
+                    gone_unpaired_device_addresses.add(unpaired_address)
+
+            for gone_device_address in gone_unpaired_device_addresses:
+                wrapped_mug = self.unpaired_mugs[gone_device_address]
+                del self.unpaired_mugs[gone_device_address]
+                await self.remove_unpaired_mug(mqtt, wrapped_mug)
+
             await asyncio.sleep(self.update_interval)
 
     async def start_mqtt_listener(self, mqtt: Client):
@@ -210,6 +258,7 @@ class EmberMqttBridge:
                     # Get the mug to which this message belongs
                     # There is certainly a better way to do this but I am lazy
                     matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
+                    matching_mugs = matching_mugs + [wrapped_mug for wrapped_mug in self.unpaired_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
                     if len(matching_mugs) == 0:
                         logging.error(f"No mugs matched {topic}. This is a bug.")
                     elif len(matching_mugs) > 1:
@@ -234,6 +283,10 @@ class EmberMqttBridge:
                             elif topic == mqtt_mug.led_color_command_topic():
                                 r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
                                 await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
+                            elif topic == mqtt_mug.pairing_button_command_topic():
+                                # Simply calling connect is enough to pair with the device
+                                async with mqtt_mug.mug.connection():
+                                    pass
                             else:
                                 logging.error(f"Unsupported command {topic}.")
 
