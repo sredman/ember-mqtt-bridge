@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Filename: ember-mqtt-bridge.py
+# Filename: ember_mqtt_bridge.py
 #
 # Author: Simon Redman <simon@ergotech.com>
 # File Created: 25.02.2023
