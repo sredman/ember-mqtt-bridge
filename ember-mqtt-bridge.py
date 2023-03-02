@@ -77,31 +77,31 @@ class MqttEmberMug:
             "suggested_area": "Office",
         }
 
-    def get_climate_entity(self) -> Dict[str, str]:
-        return {
-                    "name": self.mug.device.name,
-                    "mode_state_topic": self.state_topic(),
-                    "mode_state_template": "{{ value_json.power }}",
-                    "current_temperature_topic": self.state_topic(),
-                    "current_temperature_template": "{{ value_json.current_temperature }}",
-                    "temperature_state_topic": self.state_topic(),
-                    "temperature_state_template": "{{ value_json.desired_temperature }}",
-                    "availability_topic": self.state_topic(),
-                    "availability_template": "{{ value_json.availability }}",
-                    "mode_command_topic": self.mode_command_topic(),
-                    "temperature_command_topic": self.temperature_command_topic(),
-                    "modes": ["heat", "off"] if not self.mug.data.liquid_state == ember_mug_consts.LiquidState.EMPTY else ["off"],
-                    "temperature_unit": "C" if self.mug.data.use_metric else "F",
-                    "temp_step": 1,
-                    "unique_id": self.mug.device.address,
-                    "device": self.get_device_definition(),
-                    "icon": "mdi:coffee",
-                    "max_temp": 62.5 if self.mug.data.use_metric else 145,
-                    "min_temp": 50 if self.mug.data.use_metric else 120,
-                }
-
-    def get_climate_topic(self, discovery_prefix: str) -> str:
-        return f"{discovery_prefix}/climate/{self.sanitised_mac()}/config"
+    def get_climate_entity(self, discovery_prefix: str) -> MqttPayload:
+        return MqttPayload(
+            topic=f"{discovery_prefix}/climate/{self.sanitised_mac()}/config",
+            payload={
+                "name": self.mug.device.name,
+                "mode_state_topic": self.state_topic(),
+                "mode_state_template": "{{ value_json.power }}",
+                "current_temperature_topic": self.state_topic(),
+                "current_temperature_template": "{{ value_json.current_temperature }}",
+                "temperature_state_topic": self.state_topic(),
+                "temperature_state_template": "{{ value_json.desired_temperature }}",
+                "availability_topic": self.state_topic(),
+                "availability_template": "{{ value_json.availability }}",
+                "mode_command_topic": self.mode_command_topic(),
+                "temperature_command_topic": self.temperature_command_topic(),
+                "modes": ["heat", "off"] if not self.mug.data.liquid_state == ember_mug_consts.LiquidState.EMPTY else ["off"],
+                "temperature_unit": "C" if self.mug.data.use_metric else "F",
+                "temp_step": 1,
+                "unique_id": self.mug.device.address,
+                "device": self.get_device_definition(),
+                "icon": "mdi:coffee",
+                "max_temp": 62.5 if self.mug.data.use_metric else 145,
+                "min_temp": 50 if self.mug.data.use_metric else 120,
+            }
+        )
 
     def get_battery_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
@@ -252,9 +252,7 @@ class EmberMqttBridge:
 
     async def send_entity_discovery(self, mqtt: Client, mug: MqttEmberMug):
         entities: List[MqttPayload] = [
-            MqttPayload(
-                topic=mug.get_climate_topic(self.discovery_prefix),
-                payload=mug.get_climate_entity()),
+            mug.get_climate_entity(self.discovery_prefix),
             mug.get_battery_entity(self.discovery_prefix),
             mug.get_charging_entity(self.discovery_prefix),
             mug.get_led_entity(self.discovery_prefix),
