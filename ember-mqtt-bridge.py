@@ -152,26 +152,25 @@ class MqttEmberMug:
         )
 
     async def send_update(self, mqtt: Client, online: bool):
-        await self.mug.update_queued_attributes()
         match self.mug.data.liquid_state:
             case ember_mug_consts.LiquidState.HEATING:
-                mode = "auto"
+                mode = "heat"
             case ember_mug_consts.LiquidState.TARGET_TEMPERATURE:
-                mode = "auto"
+                mode = "heat"
             case ember_mug_consts.LiquidState.COOLING:
-                mode = "auto"
+                mode = "heat"
             case other:
                 mode = "off"
-        led_color: ember_mug_data.Colour = await self.mug.get_led_colour()
+        led_color: ember_mug_data.Colour = self.mug.data.led_colour
         state = {
             "power": mode,
             "current_temperature": self.mug.data.current_temp,
             "desired_temperature": self.mug.data.target_temp,
             "availability": "online" if online else "offline",
-            "battery_percent": (await self.mug.get_battery()).percent,
-            "battery_charging": "ON" if (await self.mug.get_battery()).on_charging_base else "OFF",
+            "battery_percent": self.mug.data.battery.percent if self.mug.data.battery else None,
+            "battery_charging": "UNKNOWN" if not self.mug.data.battery else "ON" if self.mug.data.battery.on_charging_base else "OFF",
             "led": "ON", # The LED on the mug is always on. Necessary to say so in order to get Home Assistant to behave.
-            "led_rgb": f"{led_color.red},{led_color.green},{led_color.blue}",
+            "led_rgb": f"{led_color.red},{led_color.green},{led_color.blue}" if led_color else "UNKNOWN",
         }
         update_payload: MqttPayload = MqttPayload(
             topic=self.state_topic(),
