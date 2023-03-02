@@ -8,6 +8,8 @@
 # Description: 
 #
 
+import consts
+
 import asyncio
 import asyncio_mqtt
 from asyncio_mqtt import Client, MqttError
@@ -82,7 +84,7 @@ class MqttEmberMug:
                     "availability_template": "{{ value_json.availability }}",
                     "mode_command_topic": self.mode_command_topic(),
                     "temperature_command_topic": self.temperature_command_topic(),
-                    "modes": ["auto", "off"],
+                    "modes": ["heat", "off"] if not self.mug.data.liquid_state == ember_mug_consts.LiquidState.EMPTY else ["off"],
                     "temperature_unit": "C" if self.mug.data.use_metric else "F",
                     "temp_step": 1,
                     "unique_id": self.mug.device.address,
@@ -309,6 +311,17 @@ class EmberMqttBridge:
                         await mug.subscribe()
                         await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
                         await self.send_entity_discovery(mqtt, wrapped_mug)
+
+                    changes: List[ember_mug_data.Change] = await mug.update_queued_attributes()
+
+                    # Determine whether we need to send an update to the entity, if one of the top-level configs changed
+                    for changed_attr in [change.attr for change in changes]:
+                        if changed_attr in consts.NAME_TO_EVENT_ID:
+                            attr_code = consts.NAME_TO_EVENT_ID[changed_attr]
+                            match attr_code:
+                                case ember_mug_consts.PushEvent.LIQUID_STATE_CHANGED:
+                                    # We use the LIQUID_STATE to control the "modes" field of the "climate" entity
+                                    await self.send_entity_discovery(mqtt, wrapped_mug)
 
                     await wrapped_mug.send_update(mqtt, online=True)
 
