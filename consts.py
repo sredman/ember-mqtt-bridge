@@ -18,3 +18,5 @@ Basically reverse the operation which happens in python-ember-mug/ember-mug/mug.
 NAME_TO_EVENT_ID: Dict[str, ember_mug_consts.PushEvent] = {
     "liquid_state": ember_mug_consts.PushEvent.LIQUID_STATE_CHANGED,
 }
+
+EMBER_MANUFACTURER = "Ember"
