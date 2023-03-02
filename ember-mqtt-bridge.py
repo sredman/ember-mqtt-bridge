@@ -229,7 +229,7 @@ class EmberMqttBridge:
                         async with asyncio.TaskGroup() as tg:
                             tg.create_task(self.start_mug_polling(client))
                             tg.create_task(self.start_mqtt_listener(client))
-                    except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
+                    except:
                         # We are closing down. Send out a notice that the devices we control are offline.
                         for mqtt_mug in self.tracked_mugs.values():
                             await mqtt_mug.send_update(client, online=False)
