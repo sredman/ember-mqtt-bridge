@@ -266,9 +266,18 @@ class EmberMqttBridge:
 
     async def unsubscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
-        Unsubscribe from the update topics for the given mug
+        Unsubscribe from the update topics for the given mug.
         '''
         await mqtt.unsubscribe(f"{mqtt_mug.topic_root()}/+/set")
+
+    async def handle_mug_disconnect(self, mqtt: Client, mqtt_mug: MqttEmberMug):
+        '''
+        Clean up everything which should be cleaned up when we lose connection
+        with a mug.
+        '''
+        del self.tracked_mugs[mqtt_mug.mug.device.address]
+        await mqtt_mug.send_update(mqtt, online=False)
+        await self.unsubscribe_mqtt_topic(mqtt, mqtt_mug)
 
     async def start_mug_polling(self, mqtt: Client):
         while True:
@@ -294,6 +303,8 @@ class EmberMqttBridge:
                     mug: EmberMug = wrapped_mug.mug
                     # Using current_temp as a proxy for data being initialized.
                     if mug.data.current_temp == 0:
+                        # This intentionally leaves the connection open.
+                        # If we do not, we do not get the notices to which we've subscribed.
                         await mug.update_all()
                         await mug.subscribe()
                         await self.subscribe_mqtt_topic(mqtt, wrapped_mug)
@@ -308,9 +319,7 @@ class EmberMqttBridge:
 
             for addr in missing_mugs:
                 wrapped_mug = self.tracked_mugs[addr]
-                del self.tracked_mugs[addr]
-                await wrapped_mug.send_update(mqtt, online=False)
-                await self.unsubscribe_mqtt_topic(mqtt, wrapped_mug)
+                await self.handle_mug_disconnect(mqtt, wrapped_mug)
 
             await asyncio.sleep(self.update_interval)
 
@@ -333,6 +342,7 @@ class EmberMqttBridge:
                             if device["manufacturer"] == EMBER_MANUFACTURER:
                                 connections = device["connections"]
                                 await self.add_known_device(connections[0][1])
+
                 if topic.startswith("ember") and topic.endswith("set"):
                     '''
                     Look for messages indicating a command from the user.
@@ -348,26 +358,31 @@ class EmberMqttBridge:
                     else:
                         mqtt_mug = matching_mugs[0]
 
-                        if topic == mqtt_mug.mode_command_topic():
-                            if message.payload.decode() == "off":
-                                await mqtt_mug.mug.set_target_temp(0)
-                                 # Hack the liquid state, because otherwise we won't get the state update right away.
-                                mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.WARM_NO_TEMP_CONTROL
+                        try:
+                            if topic == mqtt_mug.mode_command_topic():
+                                if message.payload.decode() == "off":
+                                    await mqtt_mug.mug.set_target_temp(0)
+                                    # Hack the liquid state, because otherwise we won't get the state update right away.
+                                    mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.WARM_NO_TEMP_CONTROL
+                                else:
+                                    # Not sure what to do here: The mug turns iteslf on when it has hot water in it.
+                                    # For lack of a better idea, do SOMETHING. If there's no water in the mug, this
+                                    # will likely have no effect.
+                                    await mqtt_mug.mug.set_target_temp(100)
+                                    mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
+                            elif topic == mqtt_mug.temperature_command_topic():
+                                await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
+                            elif topic == mqtt_mug.led_color_command_topic():
+                                r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
+                                await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
                             else:
-                                # Not sure what to do here: The mug turns iteslf on when it has hot water in it.
-                                # For lack of a better idea, do SOMETHING. If there's no water in the mug, this
-                                # will likely have no effect.
-                                await mqtt_mug.mug.set_target_temp(100)
-                                mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
-                        elif topic == mqtt_mug.temperature_command_topic():
-                            await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
-                        elif topic == mqtt_mug.led_color_command_topic():
-                            r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
-                            await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
-                        else:
-                            logging.error(f"Unsupported command {topic}.")
+                                logging.error(f"Unsupported command {topic}.")
 
-                        await mqtt_mug.send_update(mqtt, online=True)
+                            await mqtt_mug.send_update(mqtt, online=True)
+                        except BleakError:
+                            # Mug has gone unavailable since we last updated it.
+                            await self.handle_mug_disconnect(mqtt, mqtt_mug)
+
 
 def main():
     parser = argparse.ArgumentParser(
