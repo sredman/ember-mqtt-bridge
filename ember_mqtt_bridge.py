@@ -189,13 +189,18 @@ class EmberMqttBridge:
                     These devices may be from other Ember bridges running on the same MQTT server,
                     so we _cannot_ expect that they are paired.
                     '''
-                    data = json.loads(message.payload)
-                    if data and "device" in data:
-                        device = data["device"]
-                        if "connections" in device and "manufacturer" in device:
-                            if device["manufacturer"] == EMBER_MANUFACTURER:
-                                connections = device["connections"]
-                                await self.add_known_device(connections[0][1])
+                    if message.payload:
+                        data = json.loads(message.payload)
+                        if data and "device" in data:
+                            device = data["device"]
+                            if "connections" in device and "manufacturer" in device:
+                                if device["manufacturer"] == EMBER_MANUFACTURER:
+                                    connections = device["connections"]
+                                    await self.add_known_device(connections[0][1])
+                    else:
+                        # This is a device which is being deleted
+                        # TODO: Handle this case, so that we don't immediately re-discover mugs which the user has tried to delete.
+                        pass
 
                 if topic.startswith("ember") and topic.endswith("set"):
                     '''
