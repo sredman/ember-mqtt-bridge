@@ -40,8 +40,14 @@ class MqttEmberMug:
     def __init__(self, mug: EmberMug) -> None:
         self.mug: EmberMug = mug
 
+    def sanitised_mac(self) -> str:
+        '''
+        Return my connection address in a form which is suitable where colons aren't
+        '''
+        return self.mug.device.address.replace(":", "_")
+
     def topic_root(self) -> str:
-        return f"ember/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}"
+        return f"ember/{self.sanitised_mac()}"
 
     def state_topic(self) -> str:
         return f"{self.topic_root()}/state"
@@ -95,11 +101,11 @@ class MqttEmberMug:
                 }
 
     def get_climate_topic(self, discovery_prefix: str) -> str:
-        return f"{discovery_prefix}/climate/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}/config"
+        return f"{discovery_prefix}/climate/{self.sanitised_mac()}/config"
 
     def get_battery_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic= f"{discovery_prefix}/sensor/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}_battery/config",
+            topic= f"{discovery_prefix}/sensor/{self.sanitised_mac()}_battery/config",
             payload={
                 "name": "Mug Battery",
                 "device_class": "battery",
@@ -115,7 +121,7 @@ class MqttEmberMug:
 
     def get_charging_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic= f"{discovery_prefix}/binary_sensor/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}_battery_charging/config",
+            topic= f"{discovery_prefix}/binary_sensor/{self.sanitised_mac()}_battery_charging/config",
             payload={
                 "name": "Mug Battery Charging",
                 "device_class": "battery_charging",
@@ -130,7 +136,7 @@ class MqttEmberMug:
 
     def get_led_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic= f"{discovery_prefix}/light/{EmberMqttBridge.sanitise_mac(self.mug.device.address)}_led/config",
+            topic= f"{discovery_prefix}/light/{self.sanitised_mac()}_led/config",
             payload={
                 "name": "Mug LED",
                 "device_class": "battery_charging",
@@ -243,10 +249,6 @@ class EmberMqttBridge:
     async def add_known_device(self, device_mac: str) -> None:
         async with self.known_devices_lock:
             self.known_devices.add(device_mac)
-
-    def sanitise_mac(mac: str) -> str:
-        """Clean up a MAC so it's suitable for use where colons aren't"""
-        return mac.replace(":", "_")
 
     async def send_entity_discovery(self, mqtt: Client, mug: MqttEmberMug):
         entities: List[MqttPayload] = [
