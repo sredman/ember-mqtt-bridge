@@ -19,9 +19,12 @@ import ember_mug.data as ember_mug_data
 from ember_mug.mug import EmberMug
 
 import json
-from typing import Dict
+from typing import Dict, NamedTuple
 
-MqttPayload = namedtuple("MqttPayload", ["topic", "payload"])
+class MqttPayload(NamedTuple):
+    topic: str
+    payload: Dict[str, str]
+    retain: bool = True
 
 class MqttEmberMug:
     '''

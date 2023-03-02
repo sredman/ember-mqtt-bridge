@@ -99,7 +99,7 @@ class EmberMqttBridge:
             mug.get_led_entity(self.discovery_prefix),
         ]
         for entity in entities:
-            await mqtt.publish(entity.topic, json.dumps(entity.payload), retain=True)
+            await mqtt.publish(entity.topic, json.dumps(entity.payload), retain=entity.retain)
 
     async def subscribe_mqtt_topic(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
