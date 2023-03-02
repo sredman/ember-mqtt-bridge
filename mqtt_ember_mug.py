@@ -72,9 +72,9 @@ class MqttEmberMug:
 
     def get_climate_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic=f"{discovery_prefix}/climate/{self.sanitised_mac()}/config",
+            topic=f"{discovery_prefix}/climate/{self.sanitised_mac()}/root/config",
             payload={
-                "name": self.mug.device.name,
+                "name": "Mug Temperature Control",
                 "mode_state_topic": self.state_topic(),
                 "mode_state_template": "{{ value_json.power }}",
                 "current_temperature_topic": self.state_topic(),
@@ -98,7 +98,7 @@ class MqttEmberMug:
 
     def get_battery_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic= f"{discovery_prefix}/sensor/{self.sanitised_mac()}_battery/config",
+            topic= f"{discovery_prefix}/sensor/{self.sanitised_mac()}/battery/config",
             payload={
                 "name": "Mug Battery",
                 "device_class": "battery",
@@ -114,7 +114,7 @@ class MqttEmberMug:
 
     def get_charging_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic= f"{discovery_prefix}/binary_sensor/{self.sanitised_mac()}_battery_charging/config",
+            topic= f"{discovery_prefix}/binary_sensor/{self.sanitised_mac()}/battery_charging/config",
             payload={
                 "name": "Mug Battery Charging",
                 "device_class": "battery_charging",
@@ -129,7 +129,7 @@ class MqttEmberMug:
 
     def get_led_entity(self, discovery_prefix: str) -> MqttPayload:
         return MqttPayload(
-            topic= f"{discovery_prefix}/light/{self.sanitised_mac()}_led/config",
+            topic= f"{discovery_prefix}/light/{self.sanitised_mac()}/led/config",
             payload={
                 "name": "Mug LED",
                 "device_class": "battery_charging",
