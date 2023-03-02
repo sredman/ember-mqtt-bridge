@@ -26,6 +26,12 @@ If you like, you can override some parameters on the command line:
 
 To pair a mug, put it in pairing mode. The bridge will present a pairing button. Find that in
 your Home Assistant interface, and press it. The mug will be picked up in the next iteration (or two).
+If a mug is already known to the system, for instance, due to having been paired with a different bridge,
+it should be grabbed automatically with no need to pair, but putting it in pairing mode might help.
+
+## Unpairing
+
+Delete the device in the MQTT integration in Home Assistant, then unpair the device from the device hosting this bridge.
 
 ## Notes
 

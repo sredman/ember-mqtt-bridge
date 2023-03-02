@@ -174,8 +174,7 @@ class EmberMqttBridge:
                         if device is None:
                             pass # I guess it's not in range. Send an "offline" status update?
                         else:
-                            if not addr in self.tracked_mugs and device.details['props']['Paired']:
-                                self.tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
+                            self.tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
             for addr in self.tracked_mugs:
                 try:
                     wrapped_mug: MqttEmberMug = self.tracked_mugs[addr]
