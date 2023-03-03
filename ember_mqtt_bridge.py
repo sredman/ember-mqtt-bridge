@@ -123,14 +123,16 @@ class EmberMqttBridge:
         '''
         await mqtt.unsubscribe(f"{mqtt_mug.topic_root()}/+/set")
 
-    async def handle_mug_disconnect(self, mqtt: Client, mqtt_mug: MqttEmberMug):
+    async def handle_mug_disconnect(self, mqtt: Client, mug_addr: str):
         '''
         Clean up everything which should be cleaned up when we lose connection
         with a mug.
         '''
-        del self.tracked_mugs[mqtt_mug.mug.device.address]
-        await mqtt_mug.send_update(mqtt, online=False)
-        await self.unsubscribe_mqtt_topic(mqtt, mqtt_mug)
+        if mug_addr in self.tracked_mugs:
+            mqtt_mug = self.tracked_mugs[mug_addr]
+            del self.tracked_mugs[mug_addr]
+            await mqtt_mug.send_update(mqtt, online=False)
+            await self.unsubscribe_mqtt_topic(mqtt, mqtt_mug)
 
     async def remove_unpaired_mug(self, mqtt: Client, mqtt_mug: MqttEmberMug):
         '''
@@ -207,8 +209,7 @@ class EmberMqttBridge:
                     logging.warning(f"Error while communicating with mug: {be}")
 
             for addr in missing_mugs:
-                wrapped_mug = self.tracked_mugs[addr]
-                await self.handle_mug_disconnect(mqtt, wrapped_mug)
+                await self.handle_mug_disconnect(mqtt, addr)
 
             gone_unpaired_device_addresses = set()
             unpaired_device_addresses = [device.address for device in unpaired_devices]
@@ -292,7 +293,8 @@ class EmberMqttBridge:
                             await mqtt_mug.send_update(mqtt, online=True)
                         except BleakError:
                             # Mug has gone unavailable since we last updated it.
-                            await self.handle_mug_disconnect(mqtt, mqtt_mug)
+                            mug_addr = mqtt_mug.mug.device.address
+                            await self.handle_mug_disconnect(mqtt, mug_addr)
 
 
 def main():
