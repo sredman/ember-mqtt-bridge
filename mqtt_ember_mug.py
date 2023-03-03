@@ -8,23 +8,17 @@
 # Description: Wrapper class to hold the EmberMug and all associated state
 #
 
-from consts import EMBER_MANUFACTURER
+from consts import EMBER_MANUFACTURER, MqttPayload
 
 import asyncio
 from asyncio_mqtt import Client
-from collections import namedtuple
 
 import ember_mug.consts as ember_mug_consts
 import ember_mug.data as ember_mug_data
 from ember_mug.mug import EmberMug
 
 import json
-from typing import Dict, NamedTuple
-
-class MqttPayload(NamedTuple):
-    topic: str
-    payload: Dict[str, str]
-    retain: bool = True
+from typing import Dict
 
 class MqttEmberMug:
     '''

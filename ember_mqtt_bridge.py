@@ -9,8 +9,8 @@
 #
 
 import consts
-from consts import EMBER_MANUFACTURER
-from mqtt_ember_mug import MqttEmberMug, MqttPayload
+from consts import EMBER_MANUFACTURER, MqttPayload
+from mqtt_ember_mug import MqttEmberMug
 
 import asyncio
 from asyncio_mqtt import Client, MqttError

@@ -10,7 +10,7 @@
 
 import ember_mug.consts as ember_mug_consts
 
-from typing import Dict, List
+from typing import Dict, List, NamedTuple
 
 '''
 Basically reverse the operation which happens in python-ember-mug/ember-mug/mug._notify_callback
@@ -20,3 +20,8 @@ NAME_TO_EVENT_ID: Dict[str, ember_mug_consts.PushEvent] = {
 }
 
 EMBER_MANUFACTURER = "Ember"
+
+class MqttPayload(NamedTuple):
+    topic: str
+    payload: Dict[str, str]
+    retain: bool = True
