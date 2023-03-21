@@ -8,3 +8,7 @@ update_interval: 30
 # MQTT login information
 mqtt_username: username
 mqtt_password: password
+# Bluetooth adapter information.
+# Optional, uncomment and provide your adapter name to pick a specific device.
+# Find the adapter name with `hciconfig` or similar.
+#adapter: hci0

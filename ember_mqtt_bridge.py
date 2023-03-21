@@ -36,6 +36,7 @@ class EmberMqttBridge:
         mqtt_password,
         update_interval,
         discovery_prefix,
+        adapter,
         ):
         self.mqtt_broker = mqtt_broker
         self.mqtt_broker_port = mqtt_broker_port
@@ -43,6 +44,7 @@ class EmberMqttBridge:
         self.mqtt_password = mqtt_password
         self.update_interval = update_interval
         self.discovery_prefix = discovery_prefix
+        self.adapter = adapter
 
         self.validate_parameters()
 
@@ -59,7 +61,8 @@ class EmberMqttBridge:
         self.known_devices_lock = asyncio.Lock()
 
     def validate_parameters(self):
-        unsupplied_params = [var for var in vars(self) if getattr(self, var) is None]
+        optional_params = ["adapter"]
+        unsupplied_params = [var for var in vars(self) if var not in optional_params and getattr(self, var) is None]
 
         if len(unsupplied_params) > 0:
             raise ExceptionGroup(
@@ -148,7 +151,7 @@ class EmberMqttBridge:
 
     async def start_mug_polling(self, mqtt: Client):
         while True:
-            unpaired_devices = [device for device in await ember_mug_scanner.discover_mugs()] # Find mugs in pairing mode
+            unpaired_devices = [device for device in await ember_mug_scanner.discover_mugs(adapter = self.adapter)] # Find mugs in pairing mode
             for unpaired_device in unpaired_devices:
                 if unpaired_device.address in self.known_devices:
                     # This is a device with which we are paired, either due to the pairing having been broken
@@ -172,7 +175,7 @@ class EmberMqttBridge:
                         else:
                             missing_mugs.append(addr)
                     else:
-                        device = await ember_mug_scanner.find_mug(addr) # Find paired mugs
+                        device = await ember_mug_scanner.find_mug(addr, adapter = self.adapter) # Find paired mugs
                         if device is None:
                             pass # I guess it's not in range. Send an "offline" status update?
                         else:
@@ -322,8 +325,9 @@ def main():
 
     parser.add_argument("--discovery-prefix", default="homeassistant",
         help="MQTT discovery prefix.")
-    
-    parser.add_argument
+
+    parser.add_argument("--adapter", required=False, type=str, default=None,
+        help="Bluetooth adapter to select, like \"hci0\"")
 
     args = parser.parse_args()
     config = {}
@@ -335,6 +339,8 @@ def main():
     for arg in vars(args):
         val = getattr(args, arg)
         if val is not None:
+            config[arg] = val
+        if arg not in config:
             config[arg] = val
 
     del config["config_file"]
