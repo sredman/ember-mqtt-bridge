@@ -26,8 +26,7 @@ If you like, you can override some parameters on the command line:
 
 To pair a mug, put it in pairing mode. The bridge will present a pairing button. Find that in
 your Home Assistant interface, and press it. The mug will be picked up in the next iteration (or two).
-If a mug is already known to the system, for instance, due to having been paired with a different bridge,
-it should be grabbed automatically with no need to pair, but putting it in pairing mode might help.
+The bridge reads known devices from the MQTT saved messages and will try to pair with known devices automatically. This doesn't always work. If you're running the bridge on a new device (or new Bluetooth adapter) and it doesn't seem to be connecting to the mug, put the mug in pairing mode. In my case, it gave confusing errors about device interference when all I needed was to re-pair!
 
 ## Unpairing
 
