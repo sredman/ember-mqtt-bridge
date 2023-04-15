@@ -153,6 +153,9 @@ class EmberMqttBridge:
         while True:
             unpaired_devices = [device for device in await ember_mug_scanner.discover_mugs(adapter = self.adapter)] # Find mugs in pairing mode
             for unpaired_device in unpaired_devices:
+                if not str(ember_mug_consts.MugCharacteristic.SERVICE) in unpaired_device.metadata['uuids']:
+                    # Work around issue where sometimes discovery loses its filter and returns random devices
+                    continue
                 if unpaired_device.address in self.known_devices:
                     # This is a device with which we are paired, either due to the pairing having been broken
                     # or due to another device on the same MQTT network having paired.
