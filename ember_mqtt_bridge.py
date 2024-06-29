@@ -18,6 +18,7 @@ from aiomqtt import Client, MqttError
 import ember_mug.consts as ember_mug_consts
 import ember_mug.scanner as ember_mug_scanner
 import ember_mug.data as ember_mug_data
+import ember_mug.utils as ember_mug_utils
 from ember_mug.mug import EmberMug
 
 import argparse
@@ -151,9 +152,10 @@ class EmberMqttBridge:
 
     async def start_mug_polling(self, mqtt: Client):
         while True:
-            unpaired_devices = [device for device in await ember_mug_scanner.discover_mugs(adapter = self.adapter)] # Find mugs in pairing mode
-            for unpaired_device in unpaired_devices:
-                if not str(ember_mug_consts.MugCharacteristic.SERVICE) in unpaired_device.metadata['uuids']:
+            discovery_results = [device for device in await ember_mug_scanner.discover_mugs(adapter = self.adapter)] # Find mugs in pairing mode
+            unpaired_devices = [] if discovery_results is None else discovery_results
+            for (unpaired_device, advertisement) in unpaired_devices:
+                if not str(ember_mug_consts.MugCharacteristic.STANDARD_SERVICE) in advertisement.service_uuids:
                     # Work around issue where sometimes discovery loses its filter and returns random devices
                     continue
                 if unpaired_device.address in self.known_devices:
@@ -161,7 +163,8 @@ class EmberMqttBridge:
                     # or due to another device on the same MQTT network having paired.
                     # Presumably, the user wants us to connect to this device as well.
                     # (To prevent this from hapening, delete the device in Home Assistant or manually remove the MQTT topic.)
-                    async with EmberMug(unpaired_device).connection():
+                    model_info = ember_mug_utils.get_model_info_from_advertiser_data(advertisement)
+                    async with EmberMug(unpaired_device, model_info).connection():
                         pass # Connecting the bluetooth is sufficient. The next iteration will handle everything correctly.
                 elif not unpaired_device.address in self.unpaired_mugs:
                     wrapped_mug = MqttEmberMug(EmberMug(unpaired_device))
@@ -178,11 +181,12 @@ class EmberMqttBridge:
                         else:
                             missing_mugs.append(addr)
                     else:
-                        device = await ember_mug_scanner.find_mug(addr, adapter = self.adapter) # Find paired mugs
+                        device, advertisement = await ember_mug_scanner.find_mug(addr, adapter = self.adapter) # Find paired mugs
                         if device is None:
                             pass # I guess it's not in range. Send an "offline" status update?
                         else:
-                            self.tracked_mugs[addr] = MqttEmberMug(EmberMug(device))
+                            model_info = ember_mug_utils.get_model_info_from_advertiser_data(advertisement)
+                            self.tracked_mugs[addr] = MqttEmberMug(EmberMug(device, model_info))
             for addr in self.tracked_mugs:
                 try:
                     wrapped_mug: MqttEmberMug = self.tracked_mugs[addr]
@@ -218,7 +222,7 @@ class EmberMqttBridge:
                 await self.handle_mug_disconnect(mqtt, addr)
 
             gone_unpaired_device_addresses = set()
-            unpaired_device_addresses = [device.address for device in unpaired_devices]
+            unpaired_device_addresses = [device.address for (device, advertisement) in unpaired_devices]
             for unpaired_address in self.unpaired_mugs:
                 # Clean up any unpaired devices we no longer see
                 if not unpaired_address in unpaired_device_addresses:
