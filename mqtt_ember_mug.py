@@ -11,7 +11,7 @@
 from consts import EMBER_MANUFACTURER, MqttPayload
 
 import asyncio
-from asyncio_mqtt import Client
+from aiomqtt import Client
 
 import ember_mug.consts as ember_mug_consts
 import ember_mug.data as ember_mug_data

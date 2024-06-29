@@ -1,4 +1,4 @@
-asyncio-mqtt>=0.16.1
+aiomqtt>=1.00.0
 python-ember-mug>=0.6.0
 exceptiongroup>=1.1.0
 PyYAML>=5.3

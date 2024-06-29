@@ -13,7 +13,7 @@ from consts import EMBER_MANUFACTURER, MqttPayload
 from mqtt_ember_mug import MqttEmberMug
 
 import asyncio
-from asyncio_mqtt import Client, MqttError
+from aiomqtt import Client, MqttError
 
 import ember_mug.consts as ember_mug_consts
 import ember_mug.scanner as ember_mug_scanner
@@ -232,75 +232,74 @@ class EmberMqttBridge:
             await asyncio.sleep(self.update_interval)
 
     async def start_mqtt_listener(self, mqtt: Client):
-        async with mqtt.messages() as messages:
-            await mqtt.subscribe(f"{self.discovery_prefix}/#") # Listen for knowledge of mugs we cannot see
-            async for message in messages:
-                topic = message.topic.value
-                if topic.startswith(f"{self.discovery_prefix}"):
-                    '''
-                    Look for MQTT messages indicating devices which have been discovered in the past,
-                    which we should be on the lookout for.
-                    These devices may be from other Ember bridges running on the same MQTT server,
-                    so we _cannot_ expect that they are paired.
-                    '''
-                    if message.payload:
-                        data = json.loads(message.payload)
-                        if data and "device" in data:
-                            device = data["device"]
-                            if "connections" in device and "manufacturer" in device:
-                                if device["manufacturer"] == EMBER_MANUFACTURER:
-                                    connections = device["connections"]
-                                    await self.add_known_device(connections[0][1])
-                    else:
-                        # This is a device which is being deleted
-                        # TODO: Handle this case, so that we don't immediately re-discover mugs which the user has tried to delete.
-                        pass
+        await mqtt.subscribe(f"{self.discovery_prefix}/#") # Listen for knowledge of mugs we cannot see
+        async for message in mqtt.messages:
+            topic = message.topic.value
+            if topic.startswith(f"{self.discovery_prefix}"):
+                '''
+                Look for MQTT messages indicating devices which have been discovered in the past,
+                which we should be on the lookout for.
+                These devices may be from other Ember bridges running on the same MQTT server,
+                so we _cannot_ expect that they are paired.
+                '''
+                if message.payload:
+                    data = json.loads(message.payload)
+                    if data and "device" in data:
+                        device = data["device"]
+                        if "connections" in device and "manufacturer" in device:
+                            if device["manufacturer"] == EMBER_MANUFACTURER:
+                                connections = device["connections"]
+                                await self.add_known_device(connections[0][1])
+                else:
+                    # This is a device which is being deleted
+                    # TODO: Handle this case, so that we don't immediately re-discover mugs which the user has tried to delete.
+                    pass
 
-                if topic.startswith("ember") and topic.endswith("set"):
-                    '''
-                    Look for messages indicating a command from the user.
-                    TODO: Make this section accept mugs which are handled by another MQTT instance
-                    '''
-                    # Get the mug to which this message belongs
-                    # There is certainly a better way to do this but I am lazy
-                    matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
-                    matching_mugs = matching_mugs + [wrapped_mug for wrapped_mug in self.unpaired_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
-                    if len(matching_mugs) == 0:
-                        logging.error(f"No mugs matched {topic}. This is a bug.")
-                    elif len(matching_mugs) > 1:
-                        logging.error(f"More than one mug matched {topic}. This is a bug.")
-                    else:
-                        mqtt_mug = matching_mugs[0]
+            if topic.startswith("ember") and topic.endswith("set"):
+                '''
+                Look for messages indicating a command from the user.
+                TODO: Make this section accept mugs which are handled by another MQTT instance
+                '''
+                # Get the mug to which this message belongs
+                # There is certainly a better way to do this but I am lazy
+                matching_mugs = [wrapped_mug for wrapped_mug in self.tracked_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
+                matching_mugs = matching_mugs + [wrapped_mug for wrapped_mug in self.unpaired_mugs.values() if topic.startswith(wrapped_mug.topic_root())]
+                if len(matching_mugs) == 0:
+                    logging.error(f"No mugs matched {topic}. This is a bug.")
+                elif len(matching_mugs) > 1:
+                    logging.error(f"More than one mug matched {topic}. This is a bug.")
+                else:
+                    mqtt_mug = matching_mugs[0]
 
-                        try:
-                            if topic == mqtt_mug.mode_command_topic():
-                                if message.payload.decode() == "off":
-                                    await mqtt_mug.mug.set_target_temp(0)
-                                    # Hack the liquid state, because otherwise we won't get the state update right away.
-                                    mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.WARM_NO_TEMP_CONTROL
-                                else:
-                                    # Not sure what to do here: The mug turns iteslf on when it has hot water in it.
-                                    # For lack of a better idea, do SOMETHING. If there's no water in the mug, this
-                                    # will likely have no effect.
-                                    await mqtt_mug.mug.set_target_temp(100)
-                                    mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
-                            elif topic == mqtt_mug.temperature_command_topic():
-                                await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
-                            elif topic == mqtt_mug.led_color_command_topic():
-                                r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
-                                await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
-                            elif topic == mqtt_mug.pairing_button_command_topic():
-                                # Simply calling connect is enough to pair with the device
-                                async with mqtt_mug.mug.connection():
-                                    pass
+                    try:
+                        if topic == mqtt_mug.mode_command_topic():
+                            if message.payload.decode() == "off":
+                                await mqtt_mug.mug.set_target_temp(0)
+                                # Hack the liquid state, because otherwise we won't get the state update right away.
+                                mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.WARM_NO_TEMP_CONTROL
                             else:
-                                logging.error(f"Unsupported command {topic}.")
+                                # Not sure what to do here: The mug turns iteslf on when it has hot water in it.
+                                # For lack of a better idea, do SOMETHING. If there's no water in the mug, this
+                                # will likely have no effect.
+                                await mqtt_mug.mug.set_target_temp(100)
+                                mqtt_mug.mug.data.liquid_state = ember_mug_consts.LiquidState.HEATING
+                        elif topic == mqtt_mug.temperature_command_topic():
+                            await mqtt_mug.mug.set_target_temp(float(message.payload.decode()))
+                        elif topic == mqtt_mug.led_color_command_topic():
+                            r,g,b = [int(val) for val in message.payload.decode().replace(")", "").replace("(", "").split(",")]
+                            await mqtt_mug.mug.set_led_colour(ember_mug_data.Colour(r,g,b))
+                        elif topic == mqtt_mug.pairing_button_command_topic():
+                            # Simply calling connect is enough to pair with the device
+                            async with mqtt_mug.mug.connection():
+                                pass
+                        else:
+                            logging.error(f"Unsupported command {topic}.")
 
-                            await mqtt_mug.send_update(mqtt, online=True)
-                        except BleakError:
-                            # Mug has gone unavailable since we last updated it.
-                            mug_addr = mqtt_mug.mug.device.address
-                            await self.handle_mug_disconnect(mqtt, mug_addr)
+                        await mqtt_mug.send_update(mqtt, online=True)
+                    except BleakError:
+                        # Mug has gone unavailable since we last updated it.
+                        mug_addr = mqtt_mug.mug.device.address
+                        await self.handle_mug_disconnect(mqtt, mug_addr)
 
 
 def main():
